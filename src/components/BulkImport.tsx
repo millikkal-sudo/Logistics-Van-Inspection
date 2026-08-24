@@ -71,7 +71,9 @@ export const BulkImport = ({
       setBusy(true);
       setError(null);
       try {
-        const response = await fetch('/api/admin/bulk', {
+        // Deliberately not under /api/admin: a dynamic [entity] segment
+        // sits there and shadows any sibling path it does not know about.
+        const response = await fetch('/api/fleet-import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: source, sheetUrl: url, commit }),
