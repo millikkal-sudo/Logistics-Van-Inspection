@@ -67,9 +67,6 @@ const chunk = <T,>(items: T[], size: number): T[][] => {
 const plural = (count: number, word: string): string =>
   `${count} ${word}${count === 1 ? '' : 's'}`;
 
-const timeOf = (iso: string): string =>
-  new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-
 type FailureRow = {
   inspection_id: string;
   note: string | null;
@@ -277,12 +274,6 @@ export const buildAreaReport = async (
   const held = records.filter((record) => record.dispatchBlocked).length;
   const nonCompliant = records.filter((record) => record.status === 'noncompliant').length;
 
-  const times = records.map((record) => record.performedAt).sort();
-  const window =
-    times.length > 1 && times[0] !== undefined && times[times.length - 1] !== undefined
-      ? `${timeOf(times[0])} to ${timeOf(times[times.length - 1] ?? times[0])}`
-      : timeOf(times[0] ?? now.toISOString());
-
   const previous = await previousRound(input.areaId, shift.from);
   const trend =
     previous === null
@@ -320,7 +311,7 @@ export const buildAreaReport = async (
 
   const lines: string[] = [
     `${icon} *${input.areaName}*  ·  ${shift.label} shift`,
-    `${dateLabel}  ·  ${window}  ·  ${inspector.fullName}`,
+    `${dateLabel}  ·  ${inspector.fullName}`,
     '',
   ];
 
