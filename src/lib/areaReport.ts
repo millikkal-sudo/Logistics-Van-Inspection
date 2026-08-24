@@ -1,5 +1,6 @@
 import { serviceClient } from './supabaseClients';
 import { getReportStats, listInspectionsSince } from './inspectionRepository';
+import { resolveShift, shiftDateLabel } from './shift';
 import type { InspectionSummary, Profile } from './types';
 
 /**
@@ -221,13 +222,12 @@ export const buildAreaReport = async (
   input: AreaReportInput,
   inspector: Profile,
 ): Promise<BuiltReport> => {
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
   const now = new Date();
+  const shift = resolveShift(now);
 
   const [records, stats] = await Promise.all([
-    listInspectionsSince(startOfDay, { areaId: input.areaId }),
-    getReportStats(startOfDay, now, input.areaId),
+    listInspectionsSince(shift.from, { until: shift.to, areaId: input.areaId }),
+    getReportStats(shift.from, shift.to, input.areaId),
   ]);
 
   const noteLine =
@@ -235,15 +235,12 @@ export const buildAreaReport = async (
       ? null
       : `*Inspector's notes:* ${input.note.trim()}`;
 
-  const dateLabel = now.toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
+  const dateLabel = shiftDateLabel(shift);
+  const heading = `${input.areaName}, ${shift.label.toLowerCase()} pre-departure`;
 
   if (records.length === 0) {
     const lines = [
-      `*${input.areaName}, morning pre-departure*`,
+      `*${heading}*`,
       `${dateLabel} · ${inspector.fullName}`,
       '',
       `:warning: *No vans inspected.* ${plural(stats.vansActive, 'van')} in this area were not checked.`,
@@ -267,7 +264,7 @@ export const buildAreaReport = async (
       ? `${timeOf(times[0])} to ${timeOf(times[times.length - 1] ?? times[0])}`
       : timeOf(times[0] ?? now.toISOString());
 
-  const previous = await previousRound(input.areaId, startOfDay);
+  const previous = await previousRound(input.areaId, shift.from);
   const trend =
     previous === null
       ? ''
@@ -299,7 +296,7 @@ export const buildAreaReport = async (
   const icon = held > 0 ? ':octagonal_sign:' : failureCount > 0 ? ':warning:' : ':white_check_mark:';
 
   const lines: string[] = [
-    `${icon} *${input.areaName}, morning pre-departure*`,
+    `${icon} *${heading}*`,
     `${dateLabel}, ${window} · ${inspector.fullName}`,
     '',
   ];
