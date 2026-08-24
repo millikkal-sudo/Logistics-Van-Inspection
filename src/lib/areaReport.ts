@@ -1,6 +1,6 @@
 import { serviceClient } from './supabaseClients';
 import { getReportStats, listInspectionsSince } from './inspectionRepository';
-import { resolveShift, shiftDateLabel } from './shift';
+import { previousShift, resolveShift, shiftDateLabel } from './shift';
 import type { InspectionSummary, Profile } from './types';
 
 /**
@@ -55,6 +55,14 @@ const section = (text: string): SlackBlock => ({
   type: 'section',
   text: { type: 'mrkdwn', text },
 });
+
+const chunk = <T,>(items: T[], size: number): T[][] => {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
+};
 
 const plural = (count: number, word: string): string =>
   `${count} ${word}${count === 1 ? '' : 's'}`;
@@ -223,12 +231,23 @@ export const buildAreaReport = async (
   inspector: Profile,
 ): Promise<BuiltReport> => {
   const now = new Date();
-  const shift = resolveShift(now);
+  const current = resolveShift(now);
 
-  const [records, stats] = await Promise.all([
-    listInspectionsSince(shift.from, { until: shift.to, areaId: input.areaId }),
-    getReportStats(shift.from, shift.to, input.areaId),
-  ]);
+  // A round worked in the morning but sent at 17:00 belongs to the
+  // morning, not to whichever shift the clock has reached. If the
+  // current window is empty, report on the one before it.
+  const currentRecords = await listInspectionsSince(current.from, {
+    until: current.to,
+    areaId: input.areaId,
+  });
+
+  const shift = currentRecords.length > 0 ? current : previousShift(current);
+  const records =
+    currentRecords.length > 0
+      ? currentRecords
+      : await listInspectionsSince(shift.from, { until: shift.to, areaId: input.areaId });
+
+  const stats = await getReportStats(shift.from, shift.to, input.areaId);
 
   const noteLine =
     input.note === undefined || input.note.trim() === ''
@@ -293,98 +312,123 @@ export const buildAreaReport = async (
 
   const heldRecords = records.filter((record) => record.dispatchBlocked);
 
-  const icon = held > 0 ? ':octagonal_sign:' : failureCount > 0 ? ':warning:' : ':white_check_mark:';
+  const icon = held > 0 ? ':red_circle:' : failureCount > 0 ? ':warning:' : ':white_check_mark:';
+
+  /** Pads for the monospace blocks. Slack renders those in a fixed font. */
+  const pad = (value: string, width: number): string =>
+    value.length >= width ? value : value + ' '.repeat(width - value.length);
 
   const lines: string[] = [
-    `${icon} *${heading}*`,
-    `${dateLabel}, ${window} · ${inspector.fullName}`,
+    `${icon} *${input.areaName}*  ·  ${shift.label} shift`,
+    `${dateLabel}  ·  ${window}  ·  ${inspector.fullName}`,
     '',
   ];
 
-  // Coverage first. "5 checked" says nothing without the denominator, and
-  // an uninspected van is a larger unknown than a failed one.
-  if (stats.missedPlates.length === 0) {
-    lines.push(
-      `*Coverage: ${stats.vansCovered} of ${stats.vansActive} vans.* Full fleet inspected${
-        failureCount === 0 ? ', all cleared first time.' : '.'
-      }`,
+  // The one sentence someone reads if they read nothing else.
+  const headline: string[] = [];
+  if (held > 0) {
+    headline.push(`*${plural(held, 'van')} held.*`);
+  }
+  if (stats.missedPlates.length > 0) {
+    headline.push(`${plural(stats.missedPlates.length, 'van')} went out without inspection.`);
+  }
+  if (headline.length === 0) {
+    headline.push(
+      failureCount === 0
+        ? '*Whole fleet inspected and cleared.*'
+        : `*No vans held.* ${plural(failureCount, 'failure')} to close out today.`,
     );
-  } else {
-    lines.push(
-      `*Coverage: ${stats.vansCovered} of ${stats.vansActive} vans.* ${stats.missedPlates.length} not inspected: ${stats.missedPlates.join(', ')}`,
+  }
+  lines.push(headline.join(' '), '');
+
+  // Metrics in a code block so the columns line up. A wall of prose
+  // numbers is what made the old version hard to scan.
+  const metrics: string[] = [
+    `${pad('Coverage', 14)}${pad(`${stats.vansCovered} / ${stats.vansActive} vans`, 18)}${stats.coveragePct}%`,
+    `${pad('Cleared', 14)}${pad(`${cleared} / ${records.length} checked`, 18)}${stats.compliancePct}%`,
+  ];
+  if (held > 0) {
+    metrics.push(`${pad('Held', 14)}${held}`);
+  }
+  if (nonCompliant > 0) {
+    metrics.push(`${pad('Non-compliant', 14)}${nonCompliant}`);
+  }
+  if (worstTemp !== null) {
+    const verdict =
+      worstTemp > TEMP_MAX_C
+        ? 'over limit'
+        : worstTemp === TEMP_MAX_C
+          ? 'at the limit'
+          : 'within range';
+    metrics.push(`${pad('Peak temp', 14)}${pad(`${worstTemp.toFixed(1)} \u00b0C`, 18)}${verdict}`);
+  }
+  if (previous !== null) {
+    const delta = stats.compliancePct - previous.compliancePct;
+    metrics.push(
+      `${pad('vs ' + previous.label, 14)}${delta === 0 ? 'no change' : `${delta > 0 ? '+' : ''}${delta} points`}`,
     );
   }
+  lines.push('```', ...metrics, '```');
 
-  // A clean round needs no compliance line: coverage already said it.
-  if (failureCount > 0) {
-    const parts = [`${cleared} cleared`];
-    if (nonCompliant > 0) {
-      parts.push(`${nonCompliant} non-compliant`);
-    }
-    if (held > 0) {
-      parts.push(`${held} held`);
-    }
-    lines.push(`*Compliance: ${stats.compliancePct}%* (${parts.join(', ')})${trend}`);
-  }
+  if (heldRecords.length > 0) {
+    const plateWidth = Math.max(...heldRecords.map((record) => record.plate.length)) + 3;
+    const nameWidth = Math.max(...heldRecords.map((record) => record.driverName.length)) + 3;
 
-  if (tempVerdict !== null) {
-    lines.push(tempVerdict);
-  }
-
-  if (failureCount > 0 && failureCount < FAILURE_DETAIL_THRESHOLD) {
-    // Collapsed: one line per problem rather than three headings that
-    // each restate it.
-    lines.push('');
-    for (const record of records.filter((candidate) => candidate.failedCount > 0)) {
+    lines.push('', '*Held, must not dispatch*', '```');
+    for (const record of heldRecords) {
       const deviation = byDriver.get(record.driverName);
-      const checks =
-        deviation === undefined
-          ? ''
-          : [...new Set(deviation.items)]
-              .map((item) => {
-                const breakdown = byCause.get(item);
-                if (breakdown === undefined) {
-                  return item;
-                }
-                return `${item} (${[...breakdown.keys()].join(', ').toLowerCase()})`;
-              })
-              .join(', ');
-      lines.push(
-        record.dispatchBlocked
-          ? `*${record.plate} held.* ${checks}, ${record.driverName}. Must not dispatch until re-checked.`
-          : `*${record.plate}.* ${checks}, ${record.driverName}.`,
-      );
+      const checks = deviation === undefined ? '' : [...new Set(deviation.items)].join(', ');
+      lines.push(`${pad(record.plate, plateWidth)}${pad(record.driverName, nameWidth)}${checks}`);
     }
-  } else if (failureCount >= FAILURE_DETAIL_THRESHOLD) {
-    if (heldRecords.length > 0) {
-      lines.push(
-        '',
-        '*Vans held*',
-        ...heldRecords.map((record) => `• ${record.plate}, ${record.driverName}`),
-      );
-    }
+    lines.push('```');
+  }
 
-    const topChecks = [...byCheck.entries()].sort((a, b) => b[1] - a[1]).map(([label, count]) => {
+  if (byCheck.size > 0) {
+    lines.push('', '*Main gaps*');
+    for (const [label, count] of [...byCheck.entries()].sort((a, b) => b[1] - a[1])) {
       const breakdown = byCause.get(label);
-      const detail =
+      const named =
         breakdown === undefined
-          ? ''
-          : ` (${[...breakdown.entries()]
-              .sort((a, b) => b[1] - a[1])
-              .map(([cause, n]) => `${n} ${cause.toLowerCase()}`)
-              .join(', ')})`;
-      return `• ${label}, ${plural(count, 'van')}${detail}`;
-    });
-    if (topChecks.length > 0) {
-      lines.push('', '*Main gaps*', ...topChecks);
-    }
+          ? []
+          : [...breakdown.entries()].filter(([cause]) => cause.toLowerCase() !== 'other');
 
-    const deviations = [...byDriver.values()]
-      .sort((a, b) => b.count - a.count)
-      .map((entry) => `• ${entry.name}, ${entry.count} (${[...new Set(entry.items)].join(', ')})`);
-    if (deviations.length > 0) {
-      lines.push('', '*Deviations by driver*', ...deviations);
+      if (named.length > 0) {
+        const detail = named
+          .sort((a, b) => b[1] - a[1])
+          .map(([cause, n]) => `${n} ${cause.toLowerCase()}`)
+          .join(', ');
+        lines.push(`${label}  ${plural(count, 'van')}  _(${detail})_`);
+      } else {
+        // "4 other" told nobody anything. Say what actually happened.
+        lines.push(`${label}  ${plural(count, 'van')}`);
+        lines.push('_no cause recorded_');
+      }
     }
+  }
+
+  const deviations = [...byDriver.values()]
+    .filter((entry) => entry.count > 1)
+    .sort((a, b) => b.count - a.count);
+
+  if (deviations.length > 0) {
+    lines.push('', '*More than one deviation*');
+    for (const entry of deviations) {
+      lines.push(`${entry.name}  ${entry.count}  _(${[...new Set(entry.items)].join(', ')})_`);
+    }
+  }
+
+  if (stats.missedPlates.length > 0) {
+    lines.push(
+      '',
+      `*Not inspected* (${stats.missedPlates.length})`,
+      '```',
+      // Six per line, so nine plates read as a short list rather than a
+      // paragraph of digits.
+      ...chunk(stats.missedPlates, 6).map((group) =>
+        group.map((plate) => pad(plate, 9)).join('').trimEnd(),
+      ),
+      '```',
+    );
   }
 
   const flagged = records.filter((record) => record.trainingFlag !== 'none');
@@ -399,12 +443,11 @@ export const buildAreaReport = async (
             : record.trainingFlag === 'helper'
               ? (record.helperName ?? 'helper')
               : record.driverName;
-        return `• ${who} (${record.plate})`;
+        return `${who}  _(${record.plate})_`;
       }),
     );
   }
 
-  // Always included when written, whichever shape the report takes.
   if (noteLine !== null) {
     lines.push('', noteLine);
   }
