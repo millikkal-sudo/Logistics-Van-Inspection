@@ -61,6 +61,8 @@ type Props = {
   causes: CheckCause[];
   actions: CheckAction[];
   initialToday: InspectionSummary[];
+  /** "Morning", "Evening", "Early morning". Resolved from the clock. */
+  shiftLabel: string;
   canManage: boolean;
 };
 
@@ -72,6 +74,7 @@ export const VanCheckApp = ({
   causes,
   actions,
   initialToday,
+  shiftLabel,
   canManage,
 }: Props) => {
   const [screen, setScreen] = useState<Screen>('areas');
@@ -262,6 +265,7 @@ export const VanCheckApp = ({
         {screen === 'areas' && (
           <AreaList
             profile={profile}
+            shiftLabel={shiftLabel}
             areas={areas}
             fleet={fleet}
             today={today}
@@ -300,6 +304,7 @@ export const VanCheckApp = ({
             tempValue={tempValue}
             tempMin={tempMin}
             tempMax={tempMax}
+            shiftLabel={shiftLabel}
             causes={causes}
             actions={actions}
             notes={notes}
@@ -337,6 +342,7 @@ export const VanCheckApp = ({
           <Report
             today={today}
             area={area}
+            shiftLabel={shiftLabel}
             tempMin={tempMin}
             tempMax={tempMax}
             onBack={() => setScreen(area === null ? 'areas' : 'vans')}
@@ -402,6 +408,7 @@ const Chip = ({ status }: { status: InspectionStatus }) => {
 
 const AreaList = ({
   profile,
+  shiftLabel,
   areas,
   fleet,
   today,
@@ -409,6 +416,7 @@ const AreaList = ({
   onPick,
 }: {
   profile: Profile;
+  shiftLabel: string;
   areas: Area[];
   fleet: FleetEntry[];
   today: InspectionSummary[];
@@ -417,9 +425,9 @@ const AreaList = ({
 }) => (
   <div>
     <Header
-      eyebrow={profile.fullName}
+      eyebrow={`${shiftLabel} shift · ${profile.fullName}`}
       title="Which area?"
-      sub={`${today.length} checked across the UAE this morning`}
+      sub={`${today.length} checked across the UAE this shift`}
     />
     <div className="space-y-3 p-4">
       {areas.map((area) => {
@@ -594,6 +602,7 @@ const Checklist = ({
   tempValue,
   tempMin,
   tempMax,
+  shiftLabel,
   causes,
   actions,
   notes,
@@ -622,6 +631,7 @@ const Checklist = ({
   tempValue: number | null;
   tempMin: number;
   tempMax: number;
+  shiftLabel: string;
   causes: CheckCause[];
   actions: CheckAction[];
   notes: string;
@@ -656,7 +666,7 @@ const Checklist = ({
   return (
     <div>
       <Header
-        eyebrow="Pre-departure check"
+        eyebrow={`${shiftLabel} pre-departure`}
         title={van.plate}
         sub={van.helperName === null ? van.driverName : `${van.driverName} + ${van.helperName}`}
         onBack={onBack}
@@ -1108,12 +1118,14 @@ const OutcomeView = ({
 const Report = ({
   today,
   area,
+  shiftLabel,
   tempMin,
   tempMax,
   onBack,
 }: {
   today: InspectionSummary[];
   area: Area | null;
+  shiftLabel: string;
   tempMin: number;
   tempMax: number;
   onBack: () => void;
@@ -1177,8 +1189,8 @@ const Report = ({
   return (
     <div>
       <Header
-        eyebrow="Today · pre-departure"
-        title="Morning report"
+        eyebrow={`${shiftLabel} · pre-departure`}
+        title={`${shiftLabel} report`}
         sub={area === null ? 'All areas' : area.name}
         onBack={onBack}
       />
@@ -1210,7 +1222,7 @@ const Report = ({
         </div>
 
         {records.length === 0 ? (
-          <p className="py-8 text-center text-sm text-content-secondary">No checks recorded yet today.</p>
+          <p className="py-8 text-center text-sm text-content-secondary">No checks recorded yet this shift.</p>
         ) : (
           <div className="overflow-hidden rounded-xl border border-line bg-surface-card">
             <div className="border-b border-line px-4 py-3 text-[11px] font-bold uppercase tracking-wide text-content-secondary">
@@ -1248,7 +1260,9 @@ const Report = ({
 
         {area !== null && records.length > 0 && (
           <div className="rounded-xl border border-line bg-surface-card p-4">
-            <div className="text-sm font-bold text-content">Send {area.name} report to Slack</div>
+            <div className="text-sm font-bold text-content">
+              Send {area.name} {shiftLabel.toLowerCase()} report to Slack
+            </div>
             <div className="mt-0.5 text-xs text-content-secondary">
               Compliance, gaps, and deviations by driver for the whole round.
             </div>
