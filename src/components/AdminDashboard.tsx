@@ -1362,9 +1362,10 @@ const VansTab = ({
 }) => {
   const [plate, setPlate] = useState('');
   const [areaId, setAreaId] = useState(areas[0]?.id ?? '');
+  const [vehicleType, setVehicleType] = useState<'van' | 'truck'>('van');
 
   const add = async (): Promise<void> => {
-    const ok = await onCall('/api/admin/vans', 'POST', { plate, areaId });
+    const ok = await onCall('/api/admin/vans', 'POST', { plate, areaId, vehicleType });
     if (ok) {
       setPlate('');
     }
@@ -1380,7 +1381,8 @@ const VansTab = ({
 
       <Panel title="Add a van">
         <p className="mb-3 text-xs text-content-secondary">
-          All vans run 0–5 °C. Scanning fills the plate in for you — check it before saving.
+          All vehicles run 0 to 5 °C. Transfer trucks skip the plastic curtain and floor mat
+          checks. Scanning fills the plate in for you, check it before saving.
         </p>
         <div className="flex flex-wrap items-end gap-3">
           <Field label="Plate">
@@ -1402,6 +1404,16 @@ const VansTab = ({
                   {area.name}
                 </option>
               ))}
+            </select>
+          </Field>
+          <Field label="Type">
+            <select
+              value={vehicleType}
+              onChange={(event) => setVehicleType(event.target.value === 'truck' ? 'truck' : 'van')}
+              className={inputClass}
+            >
+              <option value="van">Delivery van</option>
+              <option value="truck">Transfer truck</option>
             </select>
           </Field>
           <div className="self-end">
@@ -1437,7 +1449,18 @@ const VansTab = ({
           >
             <div>
               <span className="font-bold text-content">{van.plate}</span>
-              <span className="ml-2 text-xs text-content-secondary">{areaName(van.areaId)} · 0–5 °C</span>
+              <span
+                className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                  van.vehicleType === 'truck'
+                    ? 'bg-hold-soft text-hold'
+                    : 'bg-brand-light text-brand'
+                }`}
+              >
+                {van.vehicleType === 'truck' ? 'TRUCK' : 'VAN'}
+              </span>
+              <span className="ml-2 text-xs text-content-secondary">
+                {areaName(van.areaId)} · 0 to 5 °C
+              </span>
               {!van.active && (
                 <span className="ml-2 rounded bg-line px-2 py-0.5 text-[10px] font-bold text-content-secondary">
                   INACTIVE
