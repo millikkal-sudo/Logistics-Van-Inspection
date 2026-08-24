@@ -35,6 +35,7 @@ const buildAreaRow = (payload: Payload): Payload => ({
 // stay in the schema for a future exception.
 const buildVanRow = (payload: Payload): Payload => ({
   plate: requireText(payload.plate, 'Plate').toUpperCase(),
+  vehicle_type: payload.vehicleType === 'truck' ? 'truck' : 'van',
   area_id: optionalUuid(payload.areaId),
   temp_min_c: 0,
   temp_max_c: 5,
