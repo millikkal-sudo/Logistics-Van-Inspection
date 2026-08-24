@@ -87,7 +87,17 @@ export const VanCheckApp = ({
   const [notes, setNotes] = useState('');
   const [training, setTraining] = useState<TrainingFlag>('none');
 
-  const tempItem = checkItems.find((item) => item.inputType === 'temperature');
+  // Only the checks that apply to this vehicle. A truck has no plastic
+  // curtains or floor mats, so showing them would make it unsubmittable.
+  const applicable = useMemo(
+    () =>
+      van === null
+        ? checkItems
+        : checkItems.filter((item) => item.vehicleTypes.includes(van.vehicleType)),
+    [checkItems, van],
+  );
+
+  const tempItem = applicable.find((item) => item.inputType === 'temperature');
   const tempMin = van?.tempMinC ?? 0;
   const tempMax = van?.tempMaxC ?? 5;
 
@@ -106,8 +116,8 @@ export const VanCheckApp = ({
     return next;
   }, [answers, tempItem, tempValue, tempOk]);
 
-  const answeredCount = checkItems.filter((item) => merged[item.code]?.passed !== undefined).length;
-  const failures = checkItems.filter((item) => merged[item.code]?.passed === false);
+  const answeredCount = applicable.filter((item) => merged[item.code]?.passed !== undefined).length;
+  const failures = applicable.filter((item) => merged[item.code]?.passed === false);
   // Only the cause blocks a submission, and only where the check has
   // options configured. Photo, action and note are optional.
   const incomplete = failures.filter((item) => {
@@ -153,7 +163,7 @@ export const VanCheckApp = ({
     setSaving(true);
     setError(null);
 
-    const payload: CheckAnswer[] = checkItems.map((item) => {
+    const payload: CheckAnswer[] = applicable.map((item) => {
       const answer = merged[item.code] ?? {};
       return {
         checkItemCode: item.code,
@@ -190,7 +200,7 @@ export const VanCheckApp = ({
         throw new Error(message);
       }
 
-      const status = resolveStatus(payload, checkItems);
+      const status = resolveStatus(payload, applicable);
       const time = clockTime();
 
       setOutcome({
@@ -266,7 +276,7 @@ export const VanCheckApp = ({
         {screen === 'check' && van !== null && (
           <Checklist
             van={van}
-            checkItems={checkItems}
+            checkItems={applicable}
             answers={merged}
             temp={temp}
             tempOk={tempOk}
@@ -485,9 +495,21 @@ const VanList = ({
           className="w-full rounded-xl border border-line bg-surface-card px-3 py-2.5 text-sm text-content outline-none"
         />
 
-        {visible.map((entry) => {
-          const done = checkedPlates.get(entry.plate);
+        {(['van', 'truck'] as const).map((type) => {
+          const group = visible.filter((entry) => entry.vehicleType === type);
+          if (group.length === 0) {
+            return null;
+          }
           return (
+            <div key={type} className="space-y-3">
+              <div className="pt-1 text-[11px] font-bold uppercase tracking-wide text-content-secondary">
+                {type === 'van' ? 'Delivery vans' : 'Transfer trucks'} ·{' '}
+                {group.filter((entry) => checkedPlates.has(entry.plate)).length} of {group.length}{' '}
+                checked
+              </div>
+              {group.map((entry) => {
+                const done = checkedPlates.get(entry.plate);
+                return (
             <button
               key={entry.vanId}
               type="button"
@@ -510,11 +532,14 @@ const VanList = ({
                 </div>
               </div>
               {done === undefined ? (
-                <span className="text-lg text-brand">›</span>
-              ) : (
-                <Chip status={done} />
-              )}
-            </button>
+                      <span className="text-lg text-brand">›</span>
+                    ) : (
+                      <Chip status={done} />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           );
         })}
 
