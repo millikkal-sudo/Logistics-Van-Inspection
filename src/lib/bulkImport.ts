@@ -24,6 +24,7 @@ export type FleetDraft = {
   existingVanId: string | null;
   driverName: string;
   helperName: string;
+  vehicleType: 'van' | 'truck';
 };
 
 export type Preview = { valid: FleetDraft[]; issues: RowIssue[] };
@@ -105,9 +106,10 @@ const ALIASES: Record<string, string[]> = {
   area: ['area', 'emirate', 'location', 'city'],
   driver: ['driver', 'driver name', 'name', 'full name'],
   helper: ['helper', 'helper name', 'assistant', 'rides with', 'partner'],
+  type: ['type', 'vehicle', 'vehicle type', 'van or truck'],
 };
 
-const FIELDS = ['plate', 'area', 'driver', 'helper'];
+const FIELDS = ['plate', 'area', 'driver', 'helper', 'type'];
 
 type ColumnMap = Record<string, number>;
 
@@ -128,7 +130,7 @@ const buildColumnMap = (headerCells: string[]): ColumnMap | null => {
   return Object.keys(map).length >= 2 ? map : null;
 };
 
-const POSITIONAL: ColumnMap = { plate: 0, area: 1, driver: 2, helper: 3 };
+const POSITIONAL: ColumnMap = { plate: 0, area: 1, driver: 2, helper: 3, type: 4 };
 
 const cellAt = (cells: string[], columns: ColumnMap, field: string): string => {
   const index = columns[field];
@@ -169,6 +171,9 @@ export const previewFleet = async (text: string): Promise<Preview> => {
     const areaText = cellAt(row.cells, columns, 'area');
     const driverName = cellAt(row.cells, columns, 'driver');
     const helperName = cellAt(row.cells, columns, 'helper');
+    // Anything that is not clearly a truck is a van, so an empty or
+    // missing type column keeps working.
+    const vehicleType = normalise(cellAt(row.cells, columns, 'type')) === 'truck' ? 'truck' : 'van';
 
     if (plate === '') {
       issues.push({ line: row.line, input: raw, reason: 'No plate' });
@@ -246,6 +251,7 @@ export const previewFleet = async (text: string): Promise<Preview> => {
       existingVanId: existing?.id ?? null,
       driverName,
       helperName,
+      vehicleType,
     });
   }
 
@@ -269,6 +275,7 @@ export const importFleet = async (drafts: FleetDraft[], actor: Profile): Promise
       .insert(
         newVans.map((draft) => ({
           plate: draft.plate,
+          vehicle_type: draft.vehicleType,
           area_id: draft.areaId,
           temp_min_c: 0,
           temp_max_c: 5,
