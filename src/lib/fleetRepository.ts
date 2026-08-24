@@ -1,9 +1,18 @@
 import { serviceClient } from './supabaseClients';
-import type { Area, CauseCategory, CheckAction, CheckCause, Driver, Van } from './types';
+import type {
+  Area,
+  CauseCategory,
+  CheckAction,
+  CheckCause,
+  Driver,
+  Van,
+  VehicleType,
+} from './types';
 
 export type FleetEntry = {
   vanId: string;
   plate: string;
+  vehicleType: VehicleType;
   areaId: string | null;
   tempMinC: number;
   tempMaxC: number;
@@ -17,6 +26,7 @@ type AreaRow = { id: string; name: string; code: string; active: boolean; sort_o
 type VanRow = {
   id: string;
   plate: string;
+  vehicle_type: VehicleType;
   area_id: string | null;
   temp_min_c: number;
   temp_max_c: number;
@@ -60,7 +70,7 @@ export const listAreas = async (includeInactive = false): Promise<Area[]> => {
 export const listVans = async (includeInactive = false): Promise<Van[]> => {
   let query = serviceClient()
     .from('vans')
-    .select('id, plate, area_id, temp_min_c, temp_max_c, active')
+    .select('id, plate, vehicle_type, area_id, temp_min_c, temp_max_c, active')
     .order('plate');
 
   if (!includeInactive) {
@@ -74,6 +84,7 @@ export const listVans = async (includeInactive = false): Promise<Van[]> => {
   return (data ?? []).map((row: VanRow) => ({
     id: row.id,
     plate: row.plate,
+    vehicleType: row.vehicle_type,
     areaId: row.area_id,
     tempMinC: Number(row.temp_min_c),
     tempMaxC: Number(row.temp_max_c),
@@ -130,6 +141,7 @@ export const listFleet = async (): Promise<FleetEntry[]> => {
       {
         vanId: van.id,
         plate: van.plate,
+        vehicleType: van.vehicleType,
         areaId: van.areaId,
         tempMinC: van.tempMinC,
         tempMaxC: van.tempMaxC,
