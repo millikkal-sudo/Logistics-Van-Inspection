@@ -23,6 +23,7 @@ type CheckItemRow = {
   input_type: 'boolean' | 'temperature';
   critical: boolean;
   sort_order: number;
+  vehicle_types: string[];
 };
 
 const toCheckItem = (row: CheckItemRow): CheckItem => ({
@@ -33,12 +34,13 @@ const toCheckItem = (row: CheckItemRow): CheckItem => ({
   inputType: row.input_type,
   critical: row.critical,
   sortOrder: row.sort_order,
+  vehicleTypes: (row.vehicle_types ?? ['van', 'truck']) as ('van' | 'truck')[],
 });
 
 export const listCheckItems = async (): Promise<CheckItem[]> => {
   const { data, error } = await serviceClient()
     .from('check_items')
-    .select('id, code, label, help_text, input_type, critical, sort_order')
+    .select('id, code, label, help_text, input_type, critical, sort_order, vehicle_types')
     .eq('active', true)
     .order('sort_order');
 
@@ -82,7 +84,18 @@ export const submitInspection = async (
   submission: InspectionSubmission,
   inspector: Profile,
 ): Promise<SubmitResult> => {
-  const checkItems = await listCheckItems();
+  const allItems = await listCheckItems();
+
+  // A truck has no plastic curtains or floor mats. Requiring every
+  // active check would make a truck impossible to submit.
+  const { data: vanRow } = await serviceClient()
+    .from('vans')
+    .select('vehicle_type')
+    .eq('id', submission.vanId)
+    .maybeSingle<{ vehicle_type: 'van' | 'truck' }>();
+
+  const vehicleType = vanRow?.vehicle_type ?? 'van';
+  const checkItems = allItems.filter((item) => item.vehicleTypes.includes(vehicleType));
 
   const { data: causeRows } = await serviceClient()
     .from('check_causes')
