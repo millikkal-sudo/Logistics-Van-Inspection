@@ -121,7 +121,10 @@ export const submitInspection = async (
     );
   }
 
-  const status = resolveStatus(submission.answers, checkItems);
+  const applicableAnswers = submission.answers.filter((answer) =>
+    itemsByCode.has(answer.checkItemCode),
+  );
+  const status = resolveStatus(applicableAnswers, checkItems);
   const blocked = isDispatchBlocked(status);
   const db = serviceClient();
 
@@ -148,12 +151,16 @@ export const submitInspection = async (
     throw new Error(`Could not save the check: ${inspectionError?.message ?? 'unknown'}`);
   }
 
-  const resultRows = submission.answers.map((answer) => {
+  // Answers for checks that do not apply to this vehicle are dropped
+  // rather than rejected. A client running a moment behind a checklist
+  // change would otherwise fail the whole submission, with the
+  // supervisor standing at the van and no way to proceed.
+  const resultRows = submission.answers.flatMap((answer) => {
     const item = itemsByCode.get(answer.checkItemCode);
     if (item === undefined) {
-      throw new ValidationError(`Unknown check item: ${answer.checkItemCode}`);
+      return [];
     }
-    return {
+    return [{
       inspection_id: inspection.id,
       check_item_id: item.id,
       passed: answer.passed,
@@ -161,7 +168,7 @@ export const submitInspection = async (
       note: answer.note ?? null,
       cause_id: answer.causeId ?? null,
       action_id: answer.actionId ?? null,
-    };
+    }];
   });
 
   const { data: results, error: resultsError } = await db
