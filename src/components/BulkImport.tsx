@@ -20,6 +20,7 @@ type Draft = {
   existingVanId: string | null;
   driverName: string;
   helperName: string;
+  vehicleType: 'van' | 'truck';
 };
 
 type PreviewResult = { valid: Draft[]; issues: Issue[]; imported?: number };
@@ -29,6 +30,7 @@ const COLUMNS: { key: string; note: string }[] = [
   { key: 'area', note: 'the emirate' },
   { key: 'driver', note: 'full name' },
   { key: 'helper', note: 'optional, leave blank if none' },
+  { key: 'type', note: 'optional: van or truck, defaults to van' },
 ];
 
 export const BulkImport = ({
@@ -52,9 +54,9 @@ export const BulkImport = ({
 
   const firstArea = areaNames[0] ?? 'Dubai';
   const template =
-    `plate,area,driver,helper\n` +
-    `${samplePlate},${firstArea},Rashid Al Mansoori,Joseph Fernandes\n` +
-    `DXB-99001,${areaNames[1] ?? firstArea},Anil Kumar,\n`;
+    `plate,area,driver,helper,type\n` +
+    `${samplePlate},${firstArea},Rashid Al Mansoori,Joseph Fernandes,van\n` +
+    `DXB-TR-01,${firstArea},Anil Kumar,,truck\n`;
 
   const downloadTemplate = (): void => {
     const blob = new Blob([template], { type: 'text/csv;charset=utf-8' });
@@ -313,6 +315,7 @@ export const BulkImport = ({
                     <span className="min-w-0 text-content">
                       <span className="font-bold">{draft.plate}</span>{' '}
                       <span className="text-content-secondary">
+                        {draft.vehicleType === 'truck' ? 'Truck · ' : ''}
                         {draft.areaName} · {draft.driverName}
                         {draft.helperName === '' ? '' : ` + ${draft.helperName}`}
                         {draft.existingVanId !== null && ' · existing van'}
