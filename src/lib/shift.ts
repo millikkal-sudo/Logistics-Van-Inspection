@@ -103,3 +103,13 @@ export const shiftDateLabel = (shift: Shift): string =>
     year: 'numeric',
     timeZone: 'Asia/Dubai',
   });
+
+/**
+ * The shift immediately before a given one.
+ *
+ * A round worked in the morning but sent at 17:00 would otherwise be
+ * labelled evening and show no records. Falling back one shift keeps a
+ * late send accurate rather than empty.
+ */
+export const previousShift = (shift: Shift): Shift =>
+  resolveShift(new Date(shift.from.getTime() - 60 * 1000));
