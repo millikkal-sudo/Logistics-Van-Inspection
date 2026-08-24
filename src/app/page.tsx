@@ -3,6 +3,7 @@ import { VanCheckApp } from '@/components/VanCheckApp';
 import { listActions, listAreas, listCauses, listFleet } from '@/lib/fleetRepository';
 import { listCheckItems, listInspectionsSince } from '@/lib/inspectionRepository';
 import { currentProfile, ForbiddenError, UnauthorizedError } from '@/lib/session';
+import { resolveShift } from '@/lib/shift';
 
 /**
  * Everything the phone needs, fetched in one server render. The
@@ -12,8 +13,10 @@ import { currentProfile, ForbiddenError, UnauthorizedError } from '@/lib/session
 const HomePage = async () => {
   try {
     const profile = await currentProfile();
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    // The current despatch shift, not the calendar day. A van that ran
+    // this morning is due another check before the evening round, and a
+    // shift starting at 19:00 finishes after midnight.
+    const shift = resolveShift();
 
     const [areas, fleet, checkItems, causes, actions, today] = await Promise.all([
       listAreas(),
@@ -21,7 +24,7 @@ const HomePage = async () => {
       listCheckItems(),
       listCauses(),
       listActions(),
-      listInspectionsSince(startOfDay),
+      listInspectionsSince(shift.from, { until: shift.to }),
     ]);
 
     return (
@@ -33,6 +36,7 @@ const HomePage = async () => {
         causes={causes}
         actions={actions}
         initialToday={today}
+        shiftLabel={shift.label}
         canManage={profile.role === 'manager' || profile.role === 'admin'}
       />
     );
