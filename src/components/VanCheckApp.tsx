@@ -125,8 +125,25 @@ export const VanCheckApp = ({
     const causeNeeded = causes.some((cause) => cause.checkItemId === item.id);
     return causeNeeded && answer?.causeId === undefined;
   });
-  const uploading = Object.values(merged).some((answer) => answer.uploading === true);
-  const ready = answeredCount === checkItems.length && incomplete.length === 0 && !uploading;
+  // Against `applicable`, not `checkItems`. Comparing to the full list
+  // meant a truck could never be ready: five answers can never equal the
+  // seven checks a van has.
+  const uploading = applicable.some((item) => merged[item.code]?.uploading === true);
+  const ready = answeredCount === applicable.length && incomplete.length === 0 && !uploading;
+
+  // A disabled button with no explanation is unusable at 06:30. Whatever
+  // is blocking the submission is spelled out under it.
+  const blockers: string[] = [];
+  if (answeredCount < applicable.length) {
+    const remaining = applicable.filter((item) => merged[item.code]?.passed === undefined);
+    blockers.push(`Not checked yet: ${remaining.map((item) => item.label).join(', ')}`);
+  }
+  for (const item of incomplete) {
+    blockers.push(`${item.label}: pick what caused it`);
+  }
+  if (uploading) {
+    blockers.push('A photo is still uploading');
+  }
 
   const patch = (code: string, values: Answer): void => {
     setAnswers((current) => ({ ...current, [code]: { ...current[code], ...values } }));
@@ -293,6 +310,7 @@ export const VanCheckApp = ({
             error={error}
             saving={saving}
             ready={ready}
+            blockers={blockers}
             answeredCount={answeredCount}
             incompleteCount={incomplete.length}
             uploading={uploading}
@@ -586,6 +604,7 @@ const Checklist = ({
   error,
   saving,
   ready,
+  blockers,
   answeredCount,
   incompleteCount,
   uploading,
@@ -613,6 +632,7 @@ const Checklist = ({
   error: string | null;
   saving: boolean;
   ready: boolean;
+  blockers: string[];
   answeredCount: number;
   incompleteCount: number;
   uploading: boolean;
@@ -728,8 +748,13 @@ const Checklist = ({
                       onPatch(item.code, {
                         passed: true,
                         note: '',
+                        causeId: undefined,
+                        actionId: undefined,
                         photoKey: undefined,
                         photoPreview: undefined,
+                        // Switching to pass mid upload would otherwise
+                        // leave this true and block the whole check.
+                        uploading: false,
                       })
                     }
                     className={`flex-1 rounded-lg py-3 text-sm font-bold ${
@@ -813,6 +838,16 @@ const Checklist = ({
         >
           {label}
         </button>
+
+        {!ready && blockers.length > 0 && (
+          <ul className="space-y-1 px-1 pb-2">
+            {blockers.map((blocker) => (
+              <li key={blocker} className="text-xs text-content-secondary">
+                {blocker}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );
