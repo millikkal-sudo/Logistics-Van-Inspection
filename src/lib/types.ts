@@ -25,9 +25,12 @@ export type Area = {
   sortOrder: number;
 };
 
+export type VehicleType = 'van' | 'truck';
+
 export type Van = {
   id: string;
   plate: string;
+  vehicleType: VehicleType;
   areaId: string | null;
   tempMinC: number;
   tempMaxC: number;
@@ -81,6 +84,8 @@ export type CheckAction = {
 export type CheckItem = {
   id: string;
   code: string;
+  /** Which vehicle types this check applies to. */
+  vehicleTypes: VehicleType[];
   label: string;
   helpText: string | null;
   inputType: CheckInputType;
