@@ -7,6 +7,7 @@ import type { FleetEntry } from '@/lib/fleetRepository';
 import {
   resolveStatus,
   type Area,
+  type AreaRotation,
   type CheckAnswer,
   type CheckAction,
   type CheckCause,
@@ -63,6 +64,8 @@ type Props = {
   initialToday: InspectionSummary[];
   /** "Morning", "Evening", "Early morning". Resolved from the clock. */
   shiftLabel: string;
+  shiftSlot: string;
+  rotation: AreaRotation[];
   canManage: boolean;
 };
 
@@ -75,6 +78,8 @@ export const VanCheckApp = ({
   actions,
   initialToday,
   shiftLabel,
+  shiftSlot,
+  rotation,
   canManage,
 }: Props) => {
   const [screen, setScreen] = useState<Screen>('areas');
@@ -266,6 +271,8 @@ export const VanCheckApp = ({
           <AreaList
             profile={profile}
             shiftLabel={shiftLabel}
+            shiftSlot={shiftSlot}
+            rotation={rotation}
             areas={areas}
             fleet={fleet}
             today={today}
@@ -282,6 +289,7 @@ export const VanCheckApp = ({
             profile={profile}
             area={area}
             fleet={fleet.filter((entry) => entry.areaId === area.id)}
+            shiftSlot={shiftSlot}
             checkedPlates={checkedPlates}
             query={query}
             onQuery={setQuery}
@@ -409,6 +417,8 @@ const Chip = ({ status }: { status: InspectionStatus }) => {
 const AreaList = ({
   profile,
   shiftLabel,
+  shiftSlot,
+  rotation,
   areas,
   fleet,
   today,
@@ -417,6 +427,8 @@ const AreaList = ({
 }: {
   profile: Profile;
   shiftLabel: string;
+  shiftSlot: string;
+  rotation: AreaRotation[];
   areas: Area[];
   fleet: FleetEntry[];
   today: InspectionSummary[];
@@ -430,10 +442,25 @@ const AreaList = ({
       sub={`${today.length} checked across the UAE this shift`}
     />
     <div className="space-y-3 p-4">
-      {areas.map((area) => {
-        const vansHere = fleet.filter((entry) => entry.areaId === area.id).length;
+      {[...areas]
+        .sort((a, b) => {
+          // Most overdue first. With one inspector covering one area a
+          // day, where to go next is the only question this screen has
+          // to answer.
+          const left = rotation.find((entry) => entry.areaId === a.id);
+          const right = rotation.find((entry) => entry.areaId === b.id);
+          const score = (entry: AreaRotation | undefined): number =>
+            entry === undefined ? 0 : (entry.daysSince ?? 999) - entry.visitIntervalDays;
+          return score(right) - score(left);
+        })
+        .map((area) => {
+        const dueHere = fleet.filter(
+          (entry) => entry.areaId === area.id && entry.shiftSlots.includes(shiftSlot),
+        ).length;
         const doneHere = today.filter((record) => record.areaName === area.name).length;
-        const allDone = vansHere > 0 && doneHere >= vansHere;
+        const allDone = dueHere > 0 && doneHere >= dueHere;
+        const status = rotation.find((entry) => entry.areaId === area.id);
+        const vansHere = dueHere;
 
         return (
           <button
@@ -454,9 +481,22 @@ const AreaList = ({
               <div className="text-sm font-bold text-content">{area.name}</div>
               <div className="text-xs text-content-secondary">
                 {vansHere === 0
-                  ? 'No vans assigned yet'
-                  : `${doneHere} of ${vansHere} checked`}
+                  ? 'No vans due this shift'
+                  : `${doneHere} of ${vansHere} due this shift`}
               </div>
+              {status !== undefined && (
+                <div
+                  className={`text-xs ${status.overdue ? 'font-bold text-hold' : 'text-content-secondary'}`}
+                >
+                  {status.daysSince === null
+                    ? 'Never inspected'
+                    : status.daysSince === 0
+                      ? 'Visited today'
+                      : `Last visited ${status.daysSince} day${status.daysSince === 1 ? '' : 's'} ago${
+                          status.overdue ? ', overdue' : ''
+                        }`}
+                </div>
+              )}
             </div>
             {vansHere > 0 && <span className="text-lg text-brand">›</span>}
           </button>
@@ -481,6 +521,7 @@ const VanList = ({
   profile,
   area,
   fleet,
+  shiftSlot,
   checkedPlates,
   query,
   onQuery,
@@ -491,6 +532,7 @@ const VanList = ({
   profile: Profile;
   area: Area;
   fleet: FleetEntry[];
+  shiftSlot: string;
   checkedPlates: Map<string, InspectionStatus>;
   query: string;
   onQuery: (value: string) => void;
@@ -522,7 +564,9 @@ const VanList = ({
         />
 
         {(['van', 'truck'] as const).map((type) => {
-          const group = visible.filter((entry) => entry.vehicleType === type);
+          const group = visible.filter(
+            (entry) => entry.vehicleType === type && entry.shiftSlots.includes(shiftSlot),
+          );
           if (group.length === 0) {
             return null;
           }
@@ -568,6 +612,42 @@ const VanList = ({
             </div>
           );
         })}
+
+        {(() => {
+          // Still listed and still tappable. A van that turns up when it
+          // was not expected should be checkable, and that check counts.
+          const notDue = visible.filter((entry) => !entry.shiftSlots.includes(shiftSlot));
+          if (notDue.length === 0) {
+            return null;
+          }
+          return (
+            <div className="space-y-3">
+              <div className="pt-1 text-[11px] font-bold uppercase tracking-wide text-content-secondary">
+                Not due this shift · {notDue.length}
+              </div>
+              {notDue.map((entry) => (
+                <button
+                  key={entry.vanId}
+                  type="button"
+                  onClick={() => onPick(entry)}
+                  className="flex w-full items-center gap-3 rounded-xl border border-line bg-surface-card p-4 text-left opacity-60 active:scale-[0.98]"
+                >
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-content-secondary text-xs font-bold text-content-invert">
+                    {entry.plate.slice(-4)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-bold text-content">{entry.plate}</div>
+                    <div className="truncate text-xs text-content-secondary">
+                      {entry.driverName}
+                      {entry.helperName === null ? '' : ` + ${entry.helperName}`}
+                    </div>
+                  </div>
+                  <span className="text-lg text-brand">›</span>
+                </button>
+              ))}
+            </div>
+          );
+        })()}
 
         {visible.length === 0 && (
           <p className="py-8 text-center text-sm text-content-secondary">
