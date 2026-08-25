@@ -7,6 +7,7 @@ import { CaloMark } from './CaloMark';
 import { PlateScanner, type PlateReading } from './PlateScanner';
 import type {
   Area,
+  AreaRotation,
   CheckAction,
   CheckCause,
   CheckItem,
@@ -68,6 +69,7 @@ type Props = {
   drivers: Driver[];
   causes: CheckCause[];
   actions: CheckAction[];
+  rotation: AreaRotation[];
   checkItems: CheckItem[];
   isAdmin: boolean;
 };
@@ -78,6 +80,7 @@ export const AdminDashboard = ({
   drivers,
   causes,
   actions,
+  rotation,
   checkItems,
   isAdmin,
 }: Props) => {
@@ -169,7 +172,14 @@ export const AdminDashboard = ({
           </div>
         )}
 
-        {tab === 'reports' && <Reports areas={areas} />}
+        {tab === 'reports' && (
+          <>
+            <RotationPanel rotation={rotation} />
+            <div className="mt-4">
+              <Reports areas={areas} />
+            </div>
+          </>
+        )}
 
         {tab === 'training' && <TrainingTab areas={areas} />}
 
@@ -307,6 +317,60 @@ const PRESETS: { key: PresetKey; label: string }[] = [
   { key: 'lastMonth', label: 'Last month' },
   { key: 'custom', label: 'Custom' },
 ];
+
+/**
+ * Where each area sits against its cadence.
+ *
+ * Replaces a daily all-area coverage figure that could never be good:
+ * one inspector covers one area a day, so "was everywhere done today"
+ * was always no and told nobody anything. "Is this area late" does.
+ */
+const RotationPanel = ({ rotation }: { rotation: AreaRotation[] }) => {
+  const overdue = rotation.filter((entry) => entry.overdue);
+
+  return (
+    <div className="overflow-hidden rounded-md border border-line bg-surface-card">
+      <div className="flex items-baseline justify-between gap-3 border-b border-line px-4 py-3">
+        <div>
+          <div className="text-sm font-bold text-content">Area rotation</div>
+          <p className="mt-0.5 text-xs text-content-secondary">
+            Where to go next, against each area&rsquo;s visit interval.
+          </p>
+        </div>
+        {overdue.length > 0 && (
+          <span className="rounded-full bg-hold-soft px-2.5 py-1 text-[11px] font-bold text-hold">
+            {overdue.length} overdue
+          </span>
+        )}
+      </div>
+
+      {rotation.map((entry) => (
+        <div
+          key={entry.areaId}
+          className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5 last:border-b-0"
+        >
+          <div className="min-w-0">
+            <span className="text-sm font-bold text-content">{entry.areaName}</span>
+            <span className="ml-2 text-xs text-content-secondary">
+              every {entry.visitIntervalDays === 1 ? 'day' : `${entry.visitIntervalDays} days`}
+            </span>
+          </div>
+          <span
+            className={`shrink-0 text-xs font-bold ${
+              entry.overdue ? 'text-hold' : 'text-content-secondary'
+            }`}
+          >
+            {entry.daysSince === null
+              ? 'never inspected'
+              : entry.daysSince === 0
+                ? 'today'
+                : `${entry.daysSince} day${entry.daysSince === 1 ? '' : 's'} ago`}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 const Reports = ({ areas }: { areas: Area[] }) => {
   const initial = resolvePreset('week') ?? { from: iso(new Date()), to: iso(new Date()) };
@@ -1024,6 +1088,12 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
 
 /* ------------------------------- causes ------------------------------- */
 
+const SHIFT_OPTIONS: { value: string; short: string }[] = [
+  { value: 'early_morning', short: 'Early' },
+  { value: 'morning', short: 'Morning' },
+  { value: 'evening', short: 'Evening' },
+];
+
 const CATEGORY_OPTIONS = ['supply', 'standards', 'wear', 'equipment', 'behaviour', 'other'];
 
 /**
@@ -1363,9 +1433,15 @@ const VansTab = ({
   const [plate, setPlate] = useState('');
   const [areaId, setAreaId] = useState(areas[0]?.id ?? '');
   const [vehicleType, setVehicleType] = useState<'van' | 'truck'>('van');
+  const [slots, setSlots] = useState<string[]>(['early_morning', 'morning', 'evening']);
 
   const add = async (): Promise<void> => {
-    const ok = await onCall('/api/admin/vans', 'POST', { plate, areaId, vehicleType });
+    const ok = await onCall('/api/admin/vans', 'POST', {
+      plate,
+      areaId,
+      vehicleType,
+      shiftSlots: slots,
+    });
     if (ok) {
       setPlate('');
     }
@@ -1416,6 +1492,36 @@ const VansTab = ({
               <option value="truck">Transfer truck</option>
             </select>
           </Field>
+          <div>
+            <span className="text-xs font-bold uppercase tracking-wide text-content-secondary">
+              Runs on
+            </span>
+            <div className="mt-1 flex gap-1.5">
+              {SHIFT_OPTIONS.map((option) => {
+                const on = slots.includes(option.value);
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() =>
+                      setSlots(
+                        on
+                          ? slots.filter((slot) => slot !== option.value)
+                          : [...slots, option.value],
+                      )
+                    }
+                    className={`rounded-sm px-3 py-2 text-xs font-bold ${
+                      on
+                        ? 'bg-brand-action text-content-invert'
+                        : 'border border-line bg-surface-page text-content-secondary'
+                    }`}
+                  >
+                    {option.short}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <div className="self-end">
             <PlateScanner
               onDetected={(reading: PlateReading) => {
@@ -1459,7 +1565,15 @@ const VansTab = ({
                 {van.vehicleType === 'truck' ? 'TRUCK' : 'VAN'}
               </span>
               <span className="ml-2 text-xs text-content-secondary">
-                {areaName(van.areaId)} · 0 to 5 °C
+                {areaName(van.areaId)} ·{' '}
+                {van.shiftSlots.length === 3
+                  ? 'all shifts'
+                  : van.shiftSlots
+                      .map(
+                        (slot) =>
+                          SHIFT_OPTIONS.find((option) => option.value === slot)?.short ?? slot,
+                      )
+                      .join(', ')}
               </span>
               {!van.active && (
                 <span className="ml-2 rounded bg-line px-2 py-0.5 text-[10px] font-bold text-content-secondary">
