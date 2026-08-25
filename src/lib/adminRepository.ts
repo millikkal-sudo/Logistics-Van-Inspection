@@ -33,9 +33,18 @@ const buildAreaRow = (payload: Payload): Payload => ({
 
 // Every van runs 0-5 °C, so the range is not asked for. The columns
 // stay in the schema for a future exception.
+const ALL_SLOTS = ['early_morning', 'morning', 'evening'];
+
 const buildVanRow = (payload: Payload): Payload => ({
   plate: requireText(payload.plate, 'Plate').toUpperCase(),
   vehicle_type: payload.vehicleType === 'truck' ? 'truck' : 'van',
+  // An empty selection would make the van due on no shift and therefore
+  // invisible, so it falls back to all three.
+  shift_slots:
+    Array.isArray(payload.shiftSlots) &&
+    payload.shiftSlots.filter((slot) => ALL_SLOTS.includes(String(slot))).length > 0
+      ? payload.shiftSlots.filter((slot) => ALL_SLOTS.includes(String(slot)))
+      : ALL_SLOTS,
   area_id: optionalUuid(payload.areaId),
   temp_min_c: 0,
   temp_max_c: 5,
