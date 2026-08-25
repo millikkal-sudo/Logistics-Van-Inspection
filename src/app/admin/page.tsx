@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { AdminDashboard } from '@/components/AdminDashboard';
 import {
   listActions,
+  listAreaRotation,
   listAreas,
   listCauses,
   listDrivers,
@@ -20,12 +21,13 @@ const AdminPage = async () => {
 
     // Inactive records are included here — this is the only screen where
     // you can bring one back.
-    const [areas, vans, drivers, causes, actions, checkItems] = await Promise.all([
+    const [areas, vans, drivers, causes, actions, rotation, checkItems] = await Promise.all([
       listAreas(true),
       listVans(true),
       listDrivers(true),
       listCauses(true),
       listActions(true),
+      listAreaRotation(),
       listCheckItems(),
     ]);
 
@@ -36,6 +38,7 @@ const AdminPage = async () => {
         drivers={drivers}
         causes={causes}
         actions={actions}
+        rotation={rotation}
         checkItems={checkItems}
         isAdmin={profile.role === 'admin'}
       />
