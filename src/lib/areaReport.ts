@@ -56,6 +56,42 @@ const section = (text: string): SlackBlock => ({
   text: { type: 'mrkdwn', text },
 });
 
+/**
+ * Turns a friendly mention list into Slack syntax.
+ *
+ * A plain "@aflah" posts as literal text through a webhook and notifies
+ * nobody, which is the quiet way this feature fails. Slack needs the
+ * user id, so that is what the env var holds.
+ *
+ * Accepts: @here, @channel, U01ABC234 (a person), S01ABC234 (a group).
+ */
+const formatMentions = (raw: string | undefined): string => {
+  if (raw === undefined || raw.trim() === '') {
+    return '';
+  }
+
+  return raw
+    .split(',')
+    .map((token) => token.trim().replace(/^@/, ''))
+    .filter((token) => token !== '')
+    .map((token) => {
+      const upper = token.toUpperCase();
+      if (upper === 'HERE' || upper === 'CHANNEL') {
+        return `<!${upper.toLowerCase()}>`;
+      }
+      if (/^S[A-Z0-9]{6,}$/.test(upper)) {
+        return `<!subteam^${upper}>`;
+      }
+      if (/^[UW][A-Z0-9]{6,}$/.test(upper)) {
+        return `<@${upper}>`;
+      }
+      // Not an id. Posting it raw at least shows the intent rather than
+      // silently dropping it.
+      return token;
+    })
+    .join(' ');
+};
+
 const chunk = <T,>(items: T[], size: number): T[][] => {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
@@ -244,7 +280,7 @@ export const buildAreaReport = async (
       ? currentRecords
       : await listInspectionsSince(shift.from, { until: shift.to, areaId: input.areaId });
 
-  const stats = await getReportStats(shift.from, shift.to, input.areaId);
+  const stats = await getReportStats(shift.from, shift.to, input.areaId, shift.slot);
 
   const noteLine =
     input.note === undefined || input.note.trim() === ''
@@ -330,12 +366,20 @@ export const buildAreaReport = async (
         : `*No vans held.* ${plural(failureCount, 'failure')} to close out today.`,
     );
   }
-  lines.push(headline.join(' '), '');
+  // Tagged only when something needs a person. Pinging the channel on a
+  // clean round is how a channel gets muted, which costs the alerts that
+  // matter.
+  const needsAttention = held > 0 || stats.missedPlates.length > 0;
+  const mentions = formatMentions(
+    needsAttention ? process.env.SLACK_MENTIONS_ALERT : process.env.SLACK_MENTIONS_ALWAYS,
+  );
+
+  lines.push(mentions === '' ? headline.join(' ') : `${headline.join(' ')} ${mentions}`, '');
 
   // Metrics in a code block so the columns line up. A wall of prose
   // numbers is what made the old version hard to scan.
   const metrics: string[] = [
-    `${pad('Coverage', 14)}${pad(`${stats.vansCovered} / ${stats.vansActive} vans`, 18)}${stats.coveragePct}%`,
+    `${pad('Coverage', 14)}${pad(`${stats.vansCovered} / ${stats.vansActive} due`, 18)}${stats.coveragePct}%`,
     `${pad('Cleared', 14)}${pad(`${cleared} / ${records.length} checked`, 18)}${stats.compliancePct}%`,
   ];
   if (held > 0) {
@@ -358,6 +402,11 @@ export const buildAreaReport = async (
     metrics.push(
       `${pad('vs ' + previous.label, 14)}${delta === 0 ? 'no change' : `${delta > 0 ? '+' : ''}${delta} points`}`,
     );
+  }
+  if (stats.notDueCount > 0) {
+    // Stated rather than silently excluded: hiding them would make
+    // coverage look perfect without anyone checking the split is right.
+    metrics.push(`${pad('Not due', 14)}${plural(stats.notDueCount, 'van')} on other shifts`);
   }
   lines.push('```', ...metrics, '```');
 
