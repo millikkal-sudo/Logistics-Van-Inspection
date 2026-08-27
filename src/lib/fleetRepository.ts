@@ -1,7 +1,6 @@
 import { serviceClient } from './supabaseClients';
 import type {
   Area,
-  AreaRotation,
   CauseCategory,
   CheckAction,
   CheckCause,
@@ -14,7 +13,6 @@ export type FleetEntry = {
   vanId: string;
   plate: string;
   vehicleType: VehicleType;
-  shiftSlots: string[];
   areaId: string | null;
   tempMinC: number;
   tempMaxC: number;
@@ -30,13 +28,11 @@ type AreaRow = {
   code: string;
   active: boolean;
   sort_order: number;
-  visit_interval_days: number;
 };
 type VanRow = {
   id: string;
   plate: string;
   vehicle_type: VehicleType;
-  shift_slots: string[] | null;
   area_id: string | null;
   temp_min_c: number;
   temp_max_c: number;
@@ -58,13 +54,12 @@ const toArea = (row: AreaRow): Area => ({
   code: row.code,
   active: row.active,
   sortOrder: row.sort_order,
-  visitIntervalDays: row.visit_interval_days ?? 7,
 });
 
 export const listAreas = async (includeInactive = false): Promise<Area[]> => {
   let query = serviceClient()
     .from('areas')
-    .select('id, name, code, active, sort_order, visit_interval_days')
+    .select('id, name, code, active, sort_order')
     .order('sort_order');
 
   if (!includeInactive) {
@@ -81,7 +76,7 @@ export const listAreas = async (includeInactive = false): Promise<Area[]> => {
 export const listVans = async (includeInactive = false): Promise<Van[]> => {
   let query = serviceClient()
     .from('vans')
-    .select('id, plate, vehicle_type, shift_slots, area_id, temp_min_c, temp_max_c, active')
+    .select('id, plate, vehicle_type, area_id, temp_min_c, temp_max_c, active')
     .order('plate');
 
   if (!includeInactive) {
@@ -96,7 +91,6 @@ export const listVans = async (includeInactive = false): Promise<Van[]> => {
     id: row.id,
     plate: row.plate,
     vehicleType: row.vehicle_type,
-    shiftSlots: row.shift_slots ?? ['early_morning', 'morning', 'evening'],
     areaId: row.area_id,
     tempMinC: Number(row.temp_min_c),
     tempMaxC: Number(row.temp_max_c),
@@ -154,7 +148,6 @@ export const listFleet = async (): Promise<FleetEntry[]> => {
         vanId: van.id,
         plate: van.plate,
         vehicleType: van.vehicleType,
-        shiftSlots: van.shiftSlots,
         areaId: van.areaId,
         tempMinC: van.tempMinC,
         tempMaxC: van.tempMaxC,
@@ -174,12 +167,21 @@ export const listFleet = async (): Promise<FleetEntry[]> => {
 export const describeInspection = async (
   vanId: string,
   driverId: string,
-): Promise<{ plate: string; areaName: string; driverName: string }> => {
+  helperId?: string,
+): Promise<{
+  plate: string;
+  areaName: string;
+  driverName: string;
+  helperName: string | null;
+}> => {
   const db = serviceClient();
 
-  const [van, driver] = await Promise.all([
+  const [van, driver, helper] = await Promise.all([
     db.from('vans').select('plate, areas(name)').eq('id', vanId).maybeSingle(),
     db.from('drivers').select('full_name').eq('id', driverId).maybeSingle(),
+    helperId === undefined
+      ? Promise.resolve({ data: null })
+      : db.from('drivers').select('full_name').eq('id', helperId).maybeSingle(),
   ]);
 
   const areaRelation = (van.data as { areas?: { name?: string } | { name?: string }[] } | null)
@@ -192,6 +194,7 @@ export const describeInspection = async (
     plate: (van.data as { plate?: string } | null)?.plate ?? vanId,
     areaName,
     driverName: (driver.data as { full_name?: string } | null)?.full_name ?? driverId,
+    helperName: (helper.data as { full_name?: string } | null)?.full_name ?? null,
   };
 };
 
@@ -250,53 +253,4 @@ export const listActions = async (includeInactive = false): Promise<CheckAction[
     sortOrder: row.sort_order,
     active: row.active,
   }));
-};
-
-type RotationRow = {
-  area_id: string;
-  area_name: string;
-  area_code: string;
-  visit_interval_days: number;
-  last_visited_at: string | null;
-  days_since: number | null;
-  overdue: boolean;
-};
-
-/**
- * Where each area sits against its cadence.
- *
- * Daily coverage across seven emirates with one inspector could never be
- * good, so it said nothing. "When was this last seen, and is that late"
- * is the question that has an answer worth acting on.
- */
-export const listAreaRotation = async (): Promise<AreaRotation[]> => {
-  const { data, error } = await serviceClient()
-    .from('v_area_rotation')
-    .select('*')
-    .eq('active', true);
-
-  if (error !== null) {
-    throw new Error(`Could not load the area rotation: ${error.message}`);
-  }
-
-  return (data ?? [])
-    .map((row: RotationRow) => ({
-      areaId: row.area_id,
-      areaName: row.area_name,
-      areaCode: row.area_code,
-      visitIntervalDays: row.visit_interval_days,
-      lastVisitedAt: row.last_visited_at,
-      daysSince: row.days_since,
-      overdue: row.overdue,
-    }))
-    // Never visited first, then the most overdue.
-    .sort((a, b) => {
-      if (a.daysSince === null) {
-        return -1;
-      }
-      if (b.daysSince === null) {
-        return 1;
-      }
-      return b.daysSince - a.daysSince - (b.visitIntervalDays - a.visitIntervalDays);
-    });
 };
