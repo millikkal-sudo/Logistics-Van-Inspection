@@ -295,7 +295,7 @@ export const buildAreaReport = async (
       `*${heading}*`,
       `${dateLabel} · ${inspector.fullName}`,
       '',
-      `:warning: *No vans inspected.* ${plural(stats.vansActive, 'van')} in this area were not checked.`,
+      ':warning: *No vans inspected in this area this shift.*',
     ];
     if (noteLine !== null) {
       lines.push('', noteLine);
@@ -307,8 +307,7 @@ export const buildAreaReport = async (
   const { byCheck, byCause, byDriver, evidence, failureCount } = await gather(records);
 
   const cleared = records.filter((record) => record.status === 'compliant').length;
-  const held = records.filter((record) => record.dispatchBlocked).length;
-  const nonCompliant = records.filter((record) => record.status === 'noncompliant').length;
+  const nonCompliant = records.length - cleared;
 
   const previous = await previousRound(input.areaId, shift.from);
   const trend =
@@ -337,9 +336,7 @@ export const buildAreaReport = async (
           ? `*Highest temperature: ${worstTemp.toFixed(1)} °C*, within range but at the limit`
           : `*Highest temperature: ${worstTemp.toFixed(1)} °C*, within range`;
 
-  const heldRecords = records.filter((record) => record.dispatchBlocked);
-
-  const icon = held > 0 ? ':red_circle:' : failureCount > 0 ? ':warning:' : ':white_check_mark:';
+  const icon = failureCount > 0 ? ':warning:' : ':white_check_mark:';
 
   /** Pads for the monospace blocks. Slack renders those in a fixed font. */
   const pad = (value: string, width: number): string =>
@@ -352,24 +349,15 @@ export const buildAreaReport = async (
   ];
 
   // The one sentence someone reads if they read nothing else.
-  const headline: string[] = [];
-  if (held > 0) {
-    headline.push(`*${plural(held, 'van')} held.*`);
-  }
-  if (stats.missedPlates.length > 0) {
-    headline.push(`${plural(stats.missedPlates.length, 'van')} went out without inspection.`);
-  }
-  if (headline.length === 0) {
-    headline.push(
-      failureCount === 0
-        ? '*Whole fleet inspected and cleared.*'
-        : `*No vans held.* ${plural(failureCount, 'failure')} to close out today.`,
-    );
-  }
+  const headline: string[] = [
+    nonCompliant === 0
+      ? `*All ${plural(records.length, 'van')} cleared.*`
+      : `*${plural(nonCompliant, 'van')} non-compliant.* ${plural(failureCount, 'failure')} to close out.`,
+  ];
   // Tagged only when something needs a person. Pinging the channel on a
   // clean round is how a channel gets muted, which costs the alerts that
   // matter.
-  const needsAttention = held > 0 || stats.missedPlates.length > 0;
+  const needsAttention = nonCompliant > 0;
   const mentions = formatMentions(
     needsAttention ? process.env.SLACK_MENTIONS_ALERT : process.env.SLACK_MENTIONS_ALWAYS,
   );
@@ -379,12 +367,9 @@ export const buildAreaReport = async (
   // Metrics in a code block so the columns line up. A wall of prose
   // numbers is what made the old version hard to scan.
   const metrics: string[] = [
-    `${pad('Coverage', 14)}${pad(`${stats.vansCovered} / ${stats.vansActive} vans`, 18)}${stats.coveragePct}%`,
-    `${pad('Cleared', 14)}${pad(`${cleared} / ${records.length} checked`, 18)}${stats.compliancePct}%`,
+    `${pad('Checked', 14)}${pad(`${records.length} van${records.length === 1 ? '' : 's'}`, 18)}`,
+    `${pad('Cleared', 14)}${pad(`${cleared} / ${records.length}`, 18)}${stats.compliancePct}%`,
   ];
-  if (held > 0) {
-    metrics.push(`${pad('Held', 14)}${held}`);
-  }
   if (nonCompliant > 0) {
     metrics.push(`${pad('Non-compliant', 14)}${nonCompliant}`);
   }
@@ -405,12 +390,14 @@ export const buildAreaReport = async (
   }
   lines.push('```', ...metrics, '```');
 
-  if (heldRecords.length > 0) {
-    const plateWidth = Math.max(...heldRecords.map((record) => record.plate.length)) + 3;
-    const nameWidth = Math.max(...heldRecords.map((record) => record.driverName.length)) + 3;
+  const failing = records.filter((record) => record.status !== 'compliant');
 
-    lines.push('', '*Held, must not dispatch*', '```');
-    for (const record of heldRecords) {
+  if (failing.length > 0) {
+    const plateWidth = Math.max(...failing.map((record) => record.plate.length)) + 3;
+    const nameWidth = Math.max(...failing.map((record) => record.driverName.length)) + 3;
+
+    lines.push('', '*Non-compliant*', '```');
+    for (const record of failing) {
       const deviation = byDriver.get(record.driverName);
       const checks = deviation === undefined ? '' : [...new Set(deviation.items)].join(', ');
       lines.push(`${pad(record.plate, plateWidth)}${pad(record.driverName, nameWidth)}${checks}`);
@@ -452,19 +439,6 @@ export const buildAreaReport = async (
     }
   }
 
-  if (stats.missedPlates.length > 0) {
-    lines.push(
-      '',
-      `*Not inspected* (${stats.missedPlates.length})`,
-      '```',
-      // Six per line, so nine plates read as a short list rather than a
-      // paragraph of digits.
-      ...chunk(stats.missedPlates, 6).map((group) =>
-        group.map((plate) => pad(plate, 9)).join('').trimEnd(),
-      ),
-      '```',
-    );
-  }
 
   const flagged = records.filter((record) => record.trainingFlag !== 'none');
   if (flagged.length > 0) {
