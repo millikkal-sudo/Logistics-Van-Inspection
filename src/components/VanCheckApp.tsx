@@ -40,7 +40,13 @@ type Screen = 'areas' | 'vans' | 'check' | 'outcome' | 'report';
 const STATUS_META: Record<InspectionStatus, { label: string; text: string; bg: string; solid: string }> = {
   compliant: { label: 'Cleared', text: 'text-pass', bg: 'bg-pass-soft', solid: 'bg-pass' },
   noncompliant: { label: 'Non-compliant', text: 'text-fail', bg: 'bg-fail-soft', solid: 'bg-fail' },
-  action_required: { label: 'Dispatch held', text: 'text-hold', bg: 'bg-hold-soft', solid: 'bg-hold' },
+  // Retired. Kept so historic records still render.
+  action_required: {
+    label: 'Non-compliant',
+    text: 'text-fail',
+    bg: 'bg-fail-soft',
+    solid: 'bg-fail',
+  },
 };
 
 const TRAINING_CHOICES: { value: TrainingFlag; label: string }[] = [
@@ -220,7 +226,7 @@ export const VanCheckApp = ({
         throw new Error(message);
       }
 
-      const status = resolveStatus(payload, applicable);
+      const status = resolveStatus(payload);
       const time = clockTime();
 
       setOutcome({
@@ -240,7 +246,7 @@ export const VanCheckApp = ({
           helperName: van.helperName,
           inspectorName: profile.fullName,
           status,
-          dispatchBlocked: status === 'action_required',
+          dispatchBlocked: false,
           failedCount: failures.length,
           tempReadingC: tempValue,
           notes: notes.trim() === '' ? null : notes.trim(),
@@ -708,11 +714,6 @@ const Checklist = ({
             <div key={item.code} className={`rounded-xl border-2 bg-surface-card p-4 ${border}`}>
               <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-content">
                 {item.label}
-                {item.critical && (
-                  <span className="rounded bg-hold-soft px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-hold">
-                    BLOCKS DISPATCH
-                  </span>
-                )}
               </div>
               <div className="mt-0.5 text-xs text-content-secondary">{item.helpText}</div>
 
@@ -1059,20 +1060,15 @@ const OutcomeView = ({
   inspectorName: string;
   onNext: () => void;
 }) => {
-  const blocked = outcome.status === 'action_required';
   const meta = STATUS_META[outcome.status];
+  const cleared = outcome.status === 'compliant';
 
-  const title = blocked
-    ? 'Dispatch held'
-    : outcome.status === 'compliant'
-      ? 'Cleared for dispatch'
-      : 'Non-compliant';
-
-  const line = blocked
-    ? `${outcome.plate} must not leave the yard until the failed items are fixed and re-checked.`
-    : outcome.status === 'compliant'
-      ? `${outcome.plate} passed every check at ${outcome.time}.`
-      : `${outcome.plate} can dispatch, but the failures need closing today.`;
+  const title = cleared ? 'Cleared' : 'Non-compliant';
+  const line = cleared
+    ? `${outcome.plate} passed every check at ${outcome.time}.`
+    : `${outcome.plate} has ${outcome.failedItems.length} failure${
+        outcome.failedItems.length === 1 ? '' : 's'
+      } to close out.`;
 
   return (
     <div>
@@ -1082,14 +1078,6 @@ const OutcomeView = ({
       </div>
 
       <div className="space-y-3 p-4">
-        {blocked && (
-          <div className="rounded-xl bg-hold-soft p-4">
-            <div className="text-[11px] font-bold uppercase tracking-wide text-hold">
-              Alert sent
-            </div>
-            <div className="mt-1 text-sm text-content">#uae-fleet-ops on Slack</div>
-          </div>
-        )}
 
         {outcome.failedItems.length > 0 && (
           <div className="overflow-hidden rounded-xl border border-line bg-surface-card">
@@ -1187,7 +1175,8 @@ const Report = ({
     action_required: 0,
   };
   for (const record of records) {
-    counts[record.status] += 1;
+    // Historic records may carry the retired action_required status.
+    counts[record.status === 'compliant' ? 'compliant' : 'noncompliant'] += 1;
   }
 
   const total = records.length === 0 ? 1 : records.length;
@@ -1202,8 +1191,8 @@ const Report = ({
         onBack={onBack}
       />
       <div className="space-y-4 p-4">
-        <div className="grid grid-cols-3 gap-2">
-          {(Object.keys(counts) as InspectionStatus[]).map((key) => (
+        <div className="grid grid-cols-2 gap-2">
+          {(['compliant', 'noncompliant'] as InspectionStatus[]).map((key) => (
             <div key={key} className={`rounded-xl p-3 text-center ${STATUS_META[key].bg}`}>
               <div className={`text-3xl font-bold ${STATUS_META[key].text}`}>{counts[key]}</div>
               <div className={`mt-0.5 text-[10px] font-bold uppercase tracking-wide ${STATUS_META[key].text}`}>
