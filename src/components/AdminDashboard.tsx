@@ -785,6 +785,55 @@ const Field = ({
   </label>
 );
 
+/**
+ * Filters a list in place. Lists reach a few hundred rows once the whole
+ * fleet is loaded, and scrolling to find one plate is the slow part of
+ * every edit.
+ */
+const SearchBox = ({
+  value,
+  onChange,
+  placeholder,
+  count,
+  total,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder: string;
+  count: number;
+  total: number;
+}) => (
+  <div className="flex flex-wrap items-center gap-3">
+    <input
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      aria-label={placeholder}
+      className="min-w-[220px] flex-1 rounded-sm border border-line bg-surface-card px-3 py-2.5 text-sm text-content outline-none focus:border-brand"
+    />
+    <span className="text-xs text-content-secondary">
+      {value.trim() === '' ? `${total} total` : `${count} of ${total}`}
+    </span>
+    {value.trim() !== '' && (
+      <button
+        type="button"
+        onClick={() => onChange('')}
+        className="text-xs font-bold text-brand"
+      >
+        Clear
+      </button>
+    )}
+  </div>
+);
+
+const matches = (needle: string, ...haystack: (string | null | undefined)[]): boolean => {
+  const term = needle.trim().toLowerCase();
+  if (term === '') {
+    return true;
+  }
+  return haystack.some((value) => (value ?? '').toLowerCase().includes(term));
+};
+
 const inputClass =
   'mt-1 block w-full rounded-lg border border-line bg-surface-page px-3 py-2 text-sm font-normal text-content outline-none focus:border-brand';
 
@@ -1167,6 +1216,7 @@ const OptionsTab = ({
   const [checkItemId, setCheckItemId] = useState(checkItems[0]?.id ?? '');
   const [label, setLabel] = useState('');
   const [category, setCategory] = useState('standards');
+  const [search, setSearch] = useState('');
 
   const add = async (): Promise<void> => {
     const siblings = causes.filter((cause) => cause.checkItemId === checkItemId);
@@ -1236,8 +1286,19 @@ const OptionsTab = ({
         </div>
       </Panel>
 
+      <SearchBox
+        value={search}
+        onChange={setSearch}
+        placeholder="Search causes"
+        count={causes.filter((cause) => matches(search, cause.label, cause.category)).length}
+        total={causes.length}
+      />
+
       {checkItems.map((item) => {
-        const forItem = causes.filter((cause) => cause.checkItemId === item.id);
+        const forItem = causes.filter(
+          (cause) =>
+            cause.checkItemId === item.id && matches(search, cause.label, cause.category, item.label),
+        );
         if (forItem.length === 0) {
           return null;
         }
@@ -1294,6 +1355,7 @@ const AreasTab = ({
 }) => {
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
+  const [search, setSearch] = useState('');
 
   const add = async (): Promise<void> => {
     const ok = await onCall('/api/admin/areas', 'POST', {
@@ -1341,8 +1403,18 @@ const AreasTab = ({
         </Panel>
       )}
 
+      <SearchBox
+        value={search}
+        onChange={setSearch}
+        placeholder="Search areas"
+        count={areas.filter((area) => matches(search, area.name, area.code)).length}
+        total={areas.length}
+      />
+
       <div className="overflow-hidden rounded-xl border border-line bg-surface-card">
-        {areas.map((area) => (
+        {areas
+          .filter((area) => matches(search, area.name, area.code))
+          .map((area) => (
           <div
             key={area.id}
             className="flex items-center justify-between border-b border-line px-4 py-3 last:border-b-0"
@@ -1366,7 +1438,7 @@ const AreasTab = ({
               onCall={onCall}
             />
           </div>
-        ))}
+          ))}
       </div>
     </div>
   );
@@ -1392,6 +1464,7 @@ const VansTab = ({
   const [plate, setPlate] = useState('');
   const [areaId, setAreaId] = useState(areas[0]?.id ?? '');
   const [vehicleType, setVehicleType] = useState<'van' | 'truck'>('van');
+  const [search, setSearch] = useState('');
 
   const add = async (): Promise<void> => {
     const ok = await onCall('/api/admin/vans', 'POST', { plate, areaId, vehicleType });
@@ -1468,8 +1541,18 @@ const VansTab = ({
         </div>
       </Panel>
 
+      <SearchBox
+        value={search}
+        onChange={setSearch}
+        placeholder="Search by plate or area"
+        count={vans.filter((van) => matches(search, van.plate, areaName(van.areaId))).length}
+        total={vans.length}
+      />
+
       <div className="overflow-hidden rounded-md border border-line bg-surface-card">
-        {vans.map((van) => (
+        {vans
+          .filter((van) => matches(search, van.plate, areaName(van.areaId)))
+          .map((van) => (
           <VanRow
             key={van.id}
             van={van}
@@ -1643,6 +1726,7 @@ const DriversTab = ({
   const [areaId, setAreaId] = useState(areas[0]?.id ?? '');
   const [vanId, setVanId] = useState('');
   const [partnerId, setPartnerId] = useState('');
+  const [search, setSearch] = useState('');
 
   const vansInArea = vans.filter((van) => van.areaId === areaId && van.active);
   const activeDrivers = drivers.filter(
@@ -1790,8 +1874,34 @@ const DriversTab = ({
         )}
       </Panel>
 
+      <SearchBox
+        value={search}
+        onChange={setSearch}
+        placeholder="Search by name, area or plate"
+        count={
+          drivers.filter((person) =>
+            matches(
+              search,
+              person.fullName,
+              areaName(person.areaId),
+              vans.find((van) => van.id === person.defaultVanId)?.plate,
+            ),
+          ).length
+        }
+        total={drivers.length}
+      />
+
       <div className="overflow-hidden rounded-xl border border-line bg-surface-card">
-        {drivers.map((person) => (
+        {drivers
+          .filter((person) =>
+            matches(
+              search,
+              person.fullName,
+              areaName(person.areaId),
+              vans.find((van) => van.id === person.defaultVanId)?.plate,
+            ),
+          )
+          .map((person) => (
           <StaffRow
             key={person.id}
             person={person}
