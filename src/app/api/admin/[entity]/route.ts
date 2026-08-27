@@ -96,8 +96,8 @@ export const DELETE = async (request: Request, context: Context): Promise<NextRe
       throw new ValidationError('id is required');
     }
 
-    await deleteRecord(auth.entity, id, auth.profile);
-    return NextResponse.json({ ok: true });
+    const result = await deleteRecord(auth.entity, id, auth.profile);
+    return NextResponse.json({ ok: true, note: result.note });
   } catch (cause: unknown) {
     return errorResponse(cause);
   }
