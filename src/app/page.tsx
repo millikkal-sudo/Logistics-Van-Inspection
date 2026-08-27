@@ -2,7 +2,6 @@ import { redirect } from 'next/navigation';
 import { VanCheckApp } from '@/components/VanCheckApp';
 import {
   listActions,
-  listAreaRotation,
   listAreas,
   listCauses,
   listFleet,
@@ -24,13 +23,13 @@ const HomePage = async () => {
     // shift starting at 19:00 finishes after midnight.
     const shift = resolveShift();
 
-    const [areas, fleet, checkItems, causes, actions, rotation, today] = await Promise.all([
+    const [areas, fleet, checkItems, causes, actions, today] = await Promise.all([
       listAreas(),
       listFleet(),
       listCheckItems(),
       listCauses(),
       listActions(),
-      listAreaRotation(),
+
       listInspectionsSince(shift.from, { until: shift.to }),
     ]);
 
@@ -44,8 +43,7 @@ const HomePage = async () => {
         actions={actions}
         initialToday={today}
         shiftLabel={shift.label}
-        shiftSlot={shift.slot}
-        rotation={rotation}
+
         canManage={profile.role === 'manager' || profile.role === 'admin'}
       />
     );
