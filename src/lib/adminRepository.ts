@@ -33,18 +33,9 @@ const buildAreaRow = (payload: Payload): Payload => ({
 
 // Every van runs 0-5 °C, so the range is not asked for. The columns
 // stay in the schema for a future exception.
-const ALL_SLOTS = ['early_morning', 'morning', 'evening'];
-
 const buildVanRow = (payload: Payload): Payload => ({
   plate: requireText(payload.plate, 'Plate').toUpperCase(),
   vehicle_type: payload.vehicleType === 'truck' ? 'truck' : 'van',
-  // An empty selection would make the van due on no shift and therefore
-  // invisible, so it falls back to all three.
-  shift_slots:
-    Array.isArray(payload.shiftSlots) &&
-    payload.shiftSlots.filter((slot) => ALL_SLOTS.includes(String(slot))).length > 0
-      ? payload.shiftSlots.filter((slot) => ALL_SLOTS.includes(String(slot)))
-      : ALL_SLOTS,
   area_id: optionalUuid(payload.areaId),
   temp_min_c: 0,
   temp_max_c: 5,
@@ -212,122 +203,65 @@ export const setActive = async (
  * data from setting up.
  */
 
-type Blocker = { reason: string };
-
-const countRows = async (
-  table: string,
-  column: string,
-  id: string,
-): Promise<number> => {
-  const { count, error } = await serviceClient()
-    .from(table)
-    .select('id', { count: 'exact', head: true })
-    .eq(column, id);
-
-  if (error !== null) {
-    throw new Error(`Could not check ${table}: ${error.message}`);
-  }
-  return count ?? 0;
-};
-
-const findBlockers = async (entity: Entity, id: string): Promise<Blocker[]> => {
-  const blockers: Blocker[] = [];
-
-  if (entity === 'vans') {
-    const inspections = await countRows('inspections', 'van_id', id);
-    if (inspections > 0) {
-      blockers.push({
-        reason: `${inspections} inspection${inspections === 1 ? ' has' : 's have'} been filed against this van`,
-      });
-    }
-    const assigned = await countRows('drivers', 'default_van', id);
-    if (assigned > 0) {
-      blockers.push({ reason: 'a driver is still assigned to it' });
-    }
-  }
-
-  if (entity === 'drivers') {
-    const asDriver = await countRows('inspections', 'driver_id', id);
-    const asHelper = await countRows('inspections', 'helper_id', id);
-    const total = asDriver + asHelper;
-    if (total > 0) {
-      blockers.push({
-        reason: `they appear on ${total} filed inspection${total === 1 ? '' : 's'}`,
-      });
-    }
-    const helpers = await countRows('drivers', 'partner_id', id);
-    if (helpers > 0) {
-      blockers.push({ reason: 'a helper is paired with them' });
-    }
-  }
-
-  if (entity === 'actions') {
-    const used = await countRows('inspection_results', 'action_id', id);
-    if (used > 0) {
-      blockers.push({
-        reason: `it has been recorded on ${used} failed check${used === 1 ? '' : 's'}`,
-      });
-    }
-  }
-
-  if (entity === 'causes') {
-    const used = await countRows('inspection_results', 'cause_id', id);
-    if (used > 0) {
-      blockers.push({
-        reason: `it has been recorded on ${used} failed check${used === 1 ? '' : 's'}`,
-      });
-    }
-  }
-
-  if (entity === 'areas') {
-    const inspections = await countRows('inspections', 'area_id', id);
-    if (inspections > 0) {
-      blockers.push({
-        reason: `${inspections} inspection${inspections === 1 ? ' was' : 's were'} recorded here`,
-      });
-    }
-    const vans = await countRows('vans', 'area_id', id);
-    const staff = await countRows('drivers', 'area_id', id);
-    if (vans > 0) {
-      blockers.push({ reason: `${vans} van${vans === 1 ? ' is' : 's are'} assigned to it` });
-    }
-    if (staff > 0) {
-      blockers.push({
-        reason: `${staff} driver${staff === 1 ? ' or helper is' : 's or helpers are'} assigned to it`,
-      });
-    }
-  }
-
-  return blockers;
-};
-
-const LABELS: Record<Entity, string> = {
-  areas: 'area',
-  vans: 'van',
-  drivers: 'person',
-  causes: 'cause',
-  actions: 'action',
-};
+/**
+ * Deletes always succeed. Inspection history does not depend on these
+ * rows: the plate and the names are copied onto each inspection when it
+ * is filed, and the links clear themselves on delete.
+ *
+ * What still needs handling is the live configuration that points at the
+ * record, because leaving it dangling would break the app rather than
+ * the history.
+ */
 
 export const deleteRecord = async (
   entity: Entity,
   id: string,
   actor: Profile,
-): Promise<void> => {
-  const blockers = await findBlockers(entity, id);
-
-  if (blockers.length > 0) {
-    throw new ValidationError(
-      `This ${LABELS[entity]} cannot be deleted because ${blockers
-        .map((blocker) => blocker.reason)
-        .join(', and ')}. Deactivate it instead — it will stop appearing in the app but the history stays intact.`,
-    );
-  }
-
+): Promise<{ note: string | null }> => {
   const db = serviceClient();
 
   // Written before the delete: afterwards there is no row to describe.
   const { data: snapshot } = await db.from(entity).select('*').eq('id', id).maybeSingle();
+  let note: string | null = null;
+
+  if (entity === 'drivers') {
+    // A helper whose driver is gone would fail the pairing constraint,
+    // so they are unpaired and listed as a driver. Deleting a person
+    // who still works here would be the wrong call to make silently.
+    const { data: helpers } = await db
+      .from('drivers')
+      .select('id, full_name')
+      .eq('partner_id', id);
+
+    const paired = (helpers ?? []) as { id: string; full_name: string }[];
+
+    if (paired.length > 0) {
+      await db
+        .from('drivers')
+        .update({ partner_id: null, staff_role: 'driver' })
+        .eq('partner_id', id);
+
+      note = `${paired
+        .map((person) => person.full_name)
+        .join(', ')} ${paired.length === 1 ? 'was' : 'were'} unpaired and now listed as ${
+        paired.length === 1 ? 'a driver' : 'drivers'
+      }.`;
+    }
+  }
+
+  if (entity === 'areas') {
+    // Vans and staff in a deleted area keep working, unassigned, rather
+    // than disappearing from the app along with it.
+    const [vans, staff] = await Promise.all([
+      db.from('vans').update({ area_id: null }).eq('area_id', id).select('id'),
+      db.from('drivers').update({ area_id: null }).eq('area_id', id).select('id'),
+    ]);
+
+    const moved = (vans.data?.length ?? 0) + (staff.data?.length ?? 0);
+    if (moved > 0) {
+      note = `${moved} van${moved === 1 ? '' : 's'} and staff left unassigned. Give them an area before the next round.`;
+    }
+  }
 
   const { error } = await db.from(entity).delete().eq('id', id);
   if (error !== null) {
@@ -335,4 +269,5 @@ export const deleteRecord = async (
   }
 
   await audit(actor, `${entity}.deleted`, entity, id, snapshot as Payload | null);
+  return { note };
 };
