@@ -19,17 +19,15 @@ export const POST = async (request: Request): Promise<NextResponse> => {
     }
 
     const payload = body as Record<string, unknown>;
-    const areaId = payload.areaId;
-    const areaName = payload.areaName;
-
-    if (typeof areaId !== 'string' || typeof areaName !== 'string') {
-      throw new ValidationError('areaId and areaName are required');
-    }
+    // Both optional: with neither, the report covers every area the
+    // inspector visited this shift.
+    const areaId = typeof payload.areaId === 'string' ? payload.areaId : undefined;
+    const areaName = typeof payload.areaName === 'string' ? payload.areaName : undefined;
 
     const report = await buildAreaReport(
       {
-        areaId,
-        areaName,
+        ...(areaId === undefined ? {} : { areaId }),
+        ...(areaName === undefined ? {} : { areaName }),
         ...(typeof payload.note === 'string' ? { note: payload.note } : {}),
         // Taken from the request rather than an env var, so the link is
         // right on preview deployments as well as production.
@@ -42,7 +40,7 @@ export const POST = async (request: Request): Promise<NextResponse> => {
       return NextResponse.json({ text: report.text, photoCount: report.photoCount, sent: false });
     }
 
-    await postAreaReport(report, areaId);
+    await postAreaReport(report, areaId ?? null);
     return NextResponse.json({
       text: report.text,
       photoCount: report.photoCount,
