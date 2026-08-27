@@ -101,6 +101,15 @@ const chunk = <T,>(items: T[], size: number): T[][] => {
   return out;
 };
 
+/** "Dubai", "Dubai and Sharjah", "Dubai, Sharjah and Ajman". */
+const nameList = (names: string[]): string => {
+  if (names.length <= 1) {
+    return names[0] ?? 'No areas';
+  }
+  const last = names[names.length - 1] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${last}`;
+};
+
 const plural = (count: number, word: string): string =>
   `${count} ${word}${count === 1 ? '' : 's'}`;
 
@@ -292,12 +301,16 @@ export const buildAreaReport = async (
       : `*Inspector's notes:* ${input.note.trim()}`;
 
   const dateLabel = shiftDateLabel(shift);
-  const scope = input.areaName ?? 'All areas';
+  // Named from what was actually inspected, never "All areas": a round
+  // covering Sharjah and Ajman is not the whole UAE, and a heading that
+  // says otherwise is the one line someone will read wrong.
+  const visitedAreas = [...new Set(records.map((record) => record.areaName))].sort();
+  const scope = input.areaName ?? nameList(visitedAreas);
   const heading = `${scope}, ${shift.label.toLowerCase()} pre-departure`;
 
   if (records.length === 0) {
     const lines = [
-      `*${heading}*`,
+      `*${shift.label} shift*`,
       `${dateLabel} · ${inspector.fullName}`,
       '',
       ':warning: *No vans inspected this shift.*',
