@@ -342,6 +342,7 @@ const Reports = ({ areas }: { areas: Area[] }) => {
   const [areaId, setAreaId] = useState('');
   const [data, setData] = useState<ReportPayload | null>(null);
   const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
 
   const params = (): string => {
     const search = new URLSearchParams({ from, to });
@@ -458,7 +459,21 @@ const Reports = ({ areas }: { areas: Area[] }) => {
         </div>
       </div>
 
-      {data !== null && (
+      {data !== null && (() => {
+        // Filters the table only. The tiles keep reporting the whole
+        // range, so a search cannot quietly change what the numbers mean.
+        const visible = data.records.filter((row) =>
+          matches(
+            search,
+            row.plate,
+            row.driverName,
+            row.helperName,
+            row.areaName,
+            row.inspectorName,
+          ),
+        );
+
+        return (
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Tile
@@ -500,6 +515,14 @@ const Reports = ({ areas }: { areas: Area[] }) => {
             />
           </div>
 
+          <SearchBox
+            value={search}
+            onChange={setSearch}
+            placeholder="Search by plate, driver, helper, area or inspector"
+            count={visible.length}
+            total={data.records.length}
+          />
+
           <div className="overflow-x-auto rounded-md border border-line bg-surface-card">
             <table className="w-full text-left text-sm">
               <thead className="border-b border-line text-[11px] uppercase tracking-wide text-content-secondary">
@@ -513,20 +536,23 @@ const Reports = ({ areas }: { areas: Area[] }) => {
                 </tr>
               </thead>
               <tbody>
-                {data.records.map((row) => (
+                {visible.map((row) => (
                   <InspectionRow key={row.id} row={row} />
                 ))}
               </tbody>
             </table>
 
-            {data.records.length === 0 && (
+            {visible.length === 0 && (
               <p className="p-8 text-center text-sm text-content-secondary">
-                No checks in that range.
+                {data.records.length === 0
+                  ? 'No checks in that range.'
+                  : `Nothing matches "${search}" in this range. The tiles above still cover the whole range.`}
               </p>
             )}
           </div>
         </>
-      )}
+        );
+      })()}
     </div>
   );
 };
