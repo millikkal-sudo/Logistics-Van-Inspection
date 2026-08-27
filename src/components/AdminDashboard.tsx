@@ -7,7 +7,6 @@ import { CaloMark } from './CaloMark';
 import { PlateScanner, type PlateReading } from './PlateScanner';
 import type {
   Area,
-  AreaRotation,
   CheckAction,
   CheckCause,
   CheckItem,
@@ -69,7 +68,6 @@ type Props = {
   drivers: Driver[];
   causes: CheckCause[];
   actions: CheckAction[];
-  rotation: AreaRotation[];
   checkItems: CheckItem[];
   isAdmin: boolean;
 };
@@ -80,7 +78,6 @@ export const AdminDashboard = ({
   drivers,
   causes,
   actions,
-  rotation,
   checkItems,
   isAdmin,
 }: Props) => {
@@ -88,10 +85,12 @@ export const AdminDashboard = ({
   const [tab, setTab] = useState<Tab>('reports');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const call = async (path: string, method: string, body: unknown): Promise<boolean> => {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const response = await fetch(path, {
         method,
@@ -107,6 +106,18 @@ export const AdminDashboard = ({
         setError(message);
         return false;
       }
+      // A delete can report side effects, such as a helper being
+      // unpaired. Silently doing that would be worse than saying so.
+      const payload: unknown = await response.json().catch(() => null);
+      if (
+        typeof payload === 'object' &&
+        payload !== null &&
+        'note' in payload &&
+        typeof (payload as { note: unknown }).note === 'string'
+      ) {
+        setNotice(String((payload as { note: unknown }).note));
+      }
+
       router.refresh();
       return true;
     } catch {
@@ -158,6 +169,20 @@ export const AdminDashboard = ({
       </header>
 
       <div className="p-4 sm:p-6">
+        {notice !== null && (
+          <div className="mb-4 flex items-start justify-between gap-3 rounded-lg bg-hold-soft p-4">
+            <p className="text-sm font-medium leading-relaxed text-hold">{notice}</p>
+            <button
+              type="button"
+              onClick={() => setNotice(null)}
+              aria-label="Dismiss"
+              className="shrink-0 text-hold"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {error !== null && (
           <div className="mb-4 flex items-start justify-between gap-3 rounded-lg bg-fail-soft p-4">
             <p className="text-sm font-medium leading-relaxed text-fail">{error}</p>
@@ -172,14 +197,7 @@ export const AdminDashboard = ({
           </div>
         )}
 
-        {tab === 'reports' && (
-          <>
-            <RotationPanel rotation={rotation} />
-            <div className="mt-4">
-              <Reports areas={areas} />
-            </div>
-          </>
-        )}
+        {tab === 'reports' && <Reports areas={areas} />}
 
         {tab === 'training' && <TrainingTab areas={areas} />}
 
@@ -317,60 +335,6 @@ const PRESETS: { key: PresetKey; label: string }[] = [
   { key: 'lastMonth', label: 'Last month' },
   { key: 'custom', label: 'Custom' },
 ];
-
-/**
- * Where each area sits against its cadence.
- *
- * Replaces a daily all-area coverage figure that could never be good:
- * one inspector covers one area a day, so "was everywhere done today"
- * was always no and told nobody anything. "Is this area late" does.
- */
-const RotationPanel = ({ rotation }: { rotation: AreaRotation[] }) => {
-  const overdue = rotation.filter((entry) => entry.overdue);
-
-  return (
-    <div className="overflow-hidden rounded-md border border-line bg-surface-card">
-      <div className="flex items-baseline justify-between gap-3 border-b border-line px-4 py-3">
-        <div>
-          <div className="text-sm font-bold text-content">Area rotation</div>
-          <p className="mt-0.5 text-xs text-content-secondary">
-            Where to go next, against each area&rsquo;s visit interval.
-          </p>
-        </div>
-        {overdue.length > 0 && (
-          <span className="rounded-full bg-hold-soft px-2.5 py-1 text-[11px] font-bold text-hold">
-            {overdue.length} overdue
-          </span>
-        )}
-      </div>
-
-      {rotation.map((entry) => (
-        <div
-          key={entry.areaId}
-          className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5 last:border-b-0"
-        >
-          <div className="min-w-0">
-            <span className="text-sm font-bold text-content">{entry.areaName}</span>
-            <span className="ml-2 text-xs text-content-secondary">
-              every {entry.visitIntervalDays === 1 ? 'day' : `${entry.visitIntervalDays} days`}
-            </span>
-          </div>
-          <span
-            className={`shrink-0 text-xs font-bold ${
-              entry.overdue ? 'text-hold' : 'text-content-secondary'
-            }`}
-          >
-            {entry.daysSince === null
-              ? 'never inspected'
-              : entry.daysSince === 0
-                ? 'today'
-                : `${entry.daysSince} day${entry.daysSince === 1 ? '' : 's'} ago`}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-};
 
 const Reports = ({ areas }: { areas: Area[] }) => {
   const initial = resolvePreset('week') ?? { from: iso(new Date()), to: iso(new Date()) };
@@ -1088,12 +1052,6 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
 
 /* ------------------------------- causes ------------------------------- */
 
-const SHIFT_OPTIONS: { value: string; short: string }[] = [
-  { value: 'early_morning', short: 'Early' },
-  { value: 'morning', short: 'Morning' },
-  { value: 'evening', short: 'Evening' },
-];
-
 const CATEGORY_OPTIONS = ['supply', 'standards', 'wear', 'equipment', 'behaviour', 'other'];
 
 /**
@@ -1391,7 +1349,8 @@ const AreasTab = ({
           >
             <div>
               <span className="font-bold text-content">{area.name}</span>
-              <span className="ml-2 text-xs text-content-secondary">{area.code}</span>
+              <span className="ml-2 text-xs text-content-secondary">
+{area.code}</span>
               {!area.active && (
                 <span className="ml-2 rounded bg-line px-2 py-0.5 text-[10px] font-bold text-content-secondary">
                   INACTIVE
@@ -1433,15 +1392,9 @@ const VansTab = ({
   const [plate, setPlate] = useState('');
   const [areaId, setAreaId] = useState(areas[0]?.id ?? '');
   const [vehicleType, setVehicleType] = useState<'van' | 'truck'>('van');
-  const [slots, setSlots] = useState<string[]>(['early_morning', 'morning', 'evening']);
 
   const add = async (): Promise<void> => {
-    const ok = await onCall('/api/admin/vans', 'POST', {
-      plate,
-      areaId,
-      vehicleType,
-      shiftSlots: slots,
-    });
+    const ok = await onCall('/api/admin/vans', 'POST', { plate, areaId, vehicleType });
     if (ok) {
       setPlate('');
     }
@@ -1455,9 +1408,9 @@ const VansTab = ({
         onImported={onRefresh}
       />
 
-      <Panel title="Add a van">
+      <Panel title="Add a vehicle">
         <p className="mb-3 text-xs text-content-secondary">
-          All vehicles run 0 to 5 °C. Transfer trucks skip the plastic curtain and floor mat
+          All vehicles run 0 to 5 &deg;C. Transfer trucks skip the plastic curtain and floor mat
           checks. Scanning fills the plate in for you, check it before saving.
         </p>
         <div className="flex flex-wrap items-end gap-3">
@@ -1492,42 +1445,10 @@ const VansTab = ({
               <option value="truck">Transfer truck</option>
             </select>
           </Field>
-          <div>
-            <span className="text-xs font-bold uppercase tracking-wide text-content-secondary">
-              Runs on
-            </span>
-            <div className="mt-1 flex gap-1.5">
-              {SHIFT_OPTIONS.map((option) => {
-                const on = slots.includes(option.value);
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() =>
-                      setSlots(
-                        on
-                          ? slots.filter((slot) => slot !== option.value)
-                          : [...slots, option.value],
-                      )
-                    }
-                    className={`rounded-sm px-3 py-2 text-xs font-bold ${
-                      on
-                        ? 'bg-brand-action text-content-invert'
-                        : 'border border-line bg-surface-page text-content-secondary'
-                    }`}
-                  >
-                    {option.short}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
           <div className="self-end">
             <PlateScanner
               onDetected={(reading: PlateReading) => {
                 setPlate(reading.best);
-                // The plate names its emirate, so the area does not need
-                // choosing twice.
                 const match = areas.find((area) => area.code === reading.emirateCode);
                 if (match !== undefined) {
                   setAreaId(match.id);
@@ -1540,57 +1461,159 @@ const VansTab = ({
             type="button"
             onClick={() => void add()}
             disabled={busy}
-            className="rounded-lg bg-brand-action px-5 py-2.5 text-sm font-bold text-content-invert disabled:bg-line disabled:text-content-secondary"
+            className="rounded-sm bg-brand-action px-5 py-2.5 text-sm font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
           >
             Add
           </button>
         </div>
       </Panel>
 
-      <div className="overflow-hidden rounded-xl border border-line bg-surface-card">
+      <div className="overflow-hidden rounded-md border border-line bg-surface-card">
         {vans.map((van) => (
-          <div
+          <VanRow
             key={van.id}
-            className="flex items-center justify-between border-b border-line px-4 py-3 last:border-b-0"
-          >
-            <div>
-              <span className="font-bold text-content">{van.plate}</span>
-              <span
-                className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                  van.vehicleType === 'truck'
-                    ? 'bg-hold-soft text-hold'
-                    : 'bg-brand-light text-brand'
-                }`}
-              >
-                {van.vehicleType === 'truck' ? 'TRUCK' : 'VAN'}
-              </span>
-              <span className="ml-2 text-xs text-content-secondary">
-                {areaName(van.areaId)} ·{' '}
-                {van.shiftSlots.length === 3
-                  ? 'all shifts'
-                  : van.shiftSlots
-                      .map(
-                        (slot) =>
-                          SHIFT_OPTIONS.find((option) => option.value === slot)?.short ?? slot,
-                      )
-                      .join(', ')}
-              </span>
-              {!van.active && (
-                <span className="ml-2 rounded bg-line px-2 py-0.5 text-[10px] font-bold text-content-secondary">
-                  INACTIVE
-                </span>
-              )}
-            </div>
-            <ActiveToggle
-              entity="vans"
-              id={van.id}
-              label={van.plate}
-              active={van.active}
-              busy={busy}
-              onCall={onCall}
-            />
-          </div>
+            van={van}
+            areas={areas}
+            areaName={areaName}
+            busy={busy}
+            onCall={onCall}
+          />
         ))}
+      </div>
+    </div>
+  );
+};
+
+/**
+ * A van row that opens into an edit form in place.
+ *
+ * Correcting a plate by deleting and re-adding would detach the van from
+ * its own history, so a typo needs a real edit path.
+ */
+const VanRow = ({
+  van,
+  areas,
+  areaName,
+  busy,
+  onCall,
+}: {
+  van: Van;
+  areas: Area[];
+  areaName: (id: string | null) => string;
+  busy: boolean;
+  onCall: CallFn;
+}) => {
+  const [editing, setEditing] = useState(false);
+  const [plate, setPlate] = useState(van.plate);
+  const [areaId, setAreaId] = useState(van.areaId ?? areas[0]?.id ?? '');
+  const [vehicleType, setVehicleType] = useState<'van' | 'truck'>(van.vehicleType);
+
+  const save = async (): Promise<void> => {
+    const ok = await onCall('/api/admin/vans', 'PATCH', {
+      id: van.id,
+      plate,
+      areaId,
+      vehicleType,
+    });
+    if (ok) {
+      setEditing(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="border-b border-line bg-surface-page px-4 py-3 last:border-b-0">
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Plate">
+            <input
+              value={plate}
+              onChange={(event) => setPlate(event.target.value.toUpperCase())}
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Area">
+            <select
+              value={areaId}
+              onChange={(event) => setAreaId(event.target.value)}
+              className={inputClass}
+            >
+              {areas.map((area) => (
+                <option key={area.id} value={area.id}>
+                  {area.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Type">
+            <select
+              value={vehicleType}
+              onChange={(event) => setVehicleType(event.target.value === 'truck' ? 'truck' : 'van')}
+              className={inputClass}
+            >
+              <option value="van">Delivery van</option>
+              <option value="truck">Transfer truck</option>
+            </select>
+          </Field>
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={busy}
+            className="rounded-sm bg-brand-action px-5 py-2.5 text-sm font-bold text-content-invert"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPlate(van.plate);
+              setAreaId(van.areaId ?? '');
+              setVehicleType(van.vehicleType);
+              setEditing(false);
+            }}
+            className="rounded-sm border border-line px-4 py-2.5 text-sm font-bold text-content-secondary"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 last:border-b-0">
+      <div className="min-w-0">
+        <span className="font-bold text-content">{van.plate}</span>
+        <span
+          className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+            van.vehicleType === 'truck' ? 'bg-hold-soft text-hold' : 'bg-brand-light text-brand'
+          }`}
+        >
+          {van.vehicleType === 'truck' ? 'TRUCK' : 'VAN'}
+        </span>
+        <span className="ml-2 text-xs text-content-secondary">{areaName(van.areaId)}</span>
+        {!van.active && (
+          <span className="ml-2 rounded bg-line px-2 py-0.5 text-[10px] font-bold text-content-secondary">
+            INACTIVE
+          </span>
+        )}
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-brand"
+        >
+          Edit
+        </button>
+        <ActiveToggle
+          entity="vans"
+          id={van.id}
+          label={van.plate}
+          active={van.active}
+          busy={busy}
+          onCall={onCall}
+        />
       </div>
     </div>
   );
@@ -1768,52 +1791,215 @@ const DriversTab = ({
       </Panel>
 
       <div className="overflow-hidden rounded-xl border border-line bg-surface-card">
-        {drivers.map((person) => {
-          const van = vans.find((candidate) => candidate.id === person.defaultVanId);
-          const pairedWith = drivers.find((candidate) => candidate.id === person.partnerId);
+        {drivers.map((person) => (
+          <StaffRow
+            key={person.id}
+            person={person}
+            drivers={drivers}
+            vans={vans}
+            areas={areas}
+            areaName={areaName}
+            busy={busy}
+            onCall={onCall}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
 
-          return (
-            <div
-              key={person.id}
-              className="flex items-center justify-between border-b border-line px-4 py-3 last:border-b-0"
-            >
-              <div className="min-w-0">
-                <span className="font-bold text-content">{person.fullName}</span>
-                <span
-                  className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
-                    person.staffRole === 'helper'
-                      ? 'bg-surface-page text-content-secondary'
-                      : 'bg-brand-light text-brand'
-                  }`}
+/**
+ * A driver or helper row that opens into an edit form in place.
+ *
+ * A helper's van and area follow their driver, so those fields are not
+ * offered: two places recording the same fact is two places for it to
+ * drift.
+ */
+const StaffRow = ({
+  person,
+  drivers,
+  vans,
+  areas,
+  areaName,
+  busy,
+  onCall,
+}: {
+  person: Driver;
+  drivers: Driver[];
+  vans: Van[];
+  areas: Area[];
+  areaName: (id: string | null) => string;
+  busy: boolean;
+  onCall: CallFn;
+}) => {
+  const [editing, setEditing] = useState(false);
+  const [fullName, setFullName] = useState(person.fullName);
+  const [areaId, setAreaId] = useState(person.areaId ?? areas[0]?.id ?? '');
+  const [vanId, setVanId] = useState(person.defaultVanId ?? '');
+  const [partnerId, setPartnerId] = useState(person.partnerId ?? '');
+
+  const van = vans.find((candidate) => candidate.id === person.defaultVanId);
+  const pairedWith = drivers.find((candidate) => candidate.id === person.partnerId);
+  const vansInArea = vans.filter((candidate) => candidate.areaId === areaId && candidate.active);
+  const availableDrivers = drivers.filter(
+    (candidate) => candidate.staffRole === 'driver' && candidate.active,
+  );
+
+  const save = async () => {
+    const partner = drivers.find((candidate) => candidate.id === partnerId);
+
+    const payload =
+      person.staffRole === 'helper'
+        ? {
+            id: person.id,
+            staffRole: 'helper',
+            fullName,
+            partnerId,
+            areaId: partner?.areaId ?? null,
+            defaultVanId: partner?.defaultVanId ?? null,
+          }
+        : {
+            id: person.id,
+            staffRole: 'driver',
+            fullName,
+            areaId,
+            defaultVanId: vanId === '' ? null : vanId,
+          };
+
+    const ok = await onCall('/api/admin/drivers', 'PATCH', payload);
+    if (ok) {
+      setEditing(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="border-b border-line bg-surface-page px-4 py-3 last:border-b-0">
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Name">
+            <input
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+              className={inputClass}
+            />
+          </Field>
+
+          {person.staffRole === 'helper' ? (
+            <Field label="Rides with">
+              <select
+                value={partnerId}
+                onChange={(event) => setPartnerId(event.target.value)}
+                className={inputClass}
+              >
+                {availableDrivers.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.fullName}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          ) : (
+            <>
+              <Field label="Area">
+                <select
+                  value={areaId}
+                  onChange={(event) => {
+                    setAreaId(event.target.value);
+                    setVanId('');
+                  }}
+                  className={inputClass}
                 >
-                  {person.staffRole}
-                </span>
-                <span className="ml-2 text-xs text-content-secondary">
-                  {areaName(person.areaId)} ·{' '}
-                  {van === undefined ? (
-                    <span className="text-hold">no van assigned</span>
-                  ) : (
-                    van.plate
-                  )}
-                  {pairedWith !== undefined && ` · with ${pairedWith.fullName}`}
-                </span>
-                {!person.active && (
-                  <span className="ml-2 rounded bg-line px-2 py-0.5 text-[10px] font-bold text-content-secondary">
-                    INACTIVE
-                  </span>
-                )}
-              </div>
-              <ActiveToggle
-                entity="drivers"
-                id={person.id}
-                label={person.fullName}
-                active={person.active}
-                busy={busy}
-                onCall={onCall}
-              />
-            </div>
-          );
-        })}
+                  {areas.map((area) => (
+                    <option key={area.id} value={area.id}>
+                      {area.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Van">
+                <select
+                  value={vanId}
+                  onChange={(event) => setVanId(event.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">No van</option>
+                  {vansInArea.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.plate}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </>
+          )}
+
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={busy}
+            className="rounded-sm bg-brand-action px-5 py-2.5 text-sm font-bold text-content-invert"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setFullName(person.fullName);
+              setAreaId(person.areaId ?? '');
+              setVanId(person.defaultVanId ?? '');
+              setPartnerId(person.partnerId ?? '');
+              setEditing(false);
+            }}
+            className="rounded-sm border border-line px-4 py-2.5 text-sm font-bold text-content-secondary"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 last:border-b-0">
+      <div className="min-w-0">
+        <span className="font-bold text-content">{person.fullName}</span>
+        <span
+          className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+            person.staffRole === 'helper'
+              ? 'bg-surface-page text-content-secondary'
+              : 'bg-brand-light text-brand'
+          }`}
+        >
+          {person.staffRole}
+        </span>
+        <span className="ml-2 text-xs text-content-secondary">
+          {areaName(person.areaId)} ·{' '}
+          {van === undefined ? <span className="text-hold">no van assigned</span> : van.plate}
+          {pairedWith !== undefined && ` · with ${pairedWith.fullName}`}
+        </span>
+        {!person.active && (
+          <span className="ml-2 rounded bg-line px-2 py-0.5 text-[10px] font-bold text-content-secondary">
+            INACTIVE
+          </span>
+        )}
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-brand"
+        >
+          Edit
+        </button>
+        <ActiveToggle
+          entity="drivers"
+          id={person.id}
+          label={person.fullName}
+          active={person.active}
+          busy={busy}
+          onCall={onCall}
+        />
       </div>
     </div>
   );
