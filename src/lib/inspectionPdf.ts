@@ -143,16 +143,20 @@ const drawStats = (cursor: Cursor, fonts: Fonts, stats: ReportStats): void => {
 
   const tiles: { label: string; value: string; note: string }[] = [
     {
-      label: 'Fleet covered',
-      value: `${stats.coveragePct}%`,
-      note: `${stats.vansCovered} of ${stats.vansActive} vans`,
+      label: 'Vans checked',
+      value: String(stats.vansCovered),
+      note: `${stats.checks} inspection${stats.checks === 1 ? '' : 's'}`,
     },
     {
       label: 'Compliance',
       value: `${stats.compliancePct}%`,
       note: `${stats.cleared} of ${stats.checks} cleared`,
     },
-    { label: 'Dispatch held', value: String(stats.held), note: `${stats.nonCompliant} non-compliant` },
+    {
+      label: 'Non-compliant',
+      value: String(stats.nonCompliant),
+      note: 'failures to close out',
+    },
     {
       label: 'Highest temp',
       value: stats.worstTempC === null ? 'n/a' : `${stats.worstTempC.toFixed(1)} C`,
@@ -255,14 +259,8 @@ const drawTable = (
     }
 
     const when = new Date(record.performedAt);
-    const statusLabel =
-      record.status === 'compliant'
-        ? 'Cleared'
-        : record.status === 'action_required'
-          ? 'Dispatch held'
-          : 'Non-compliant';
-    const statusColour =
-      record.status === 'compliant' ? BRAND : record.status === 'action_required' ? HOLD : FAIL;
+    const statusLabel = record.status === 'compliant' ? 'Cleared' : 'Non-compliant';
+    const statusColour = record.status === 'compliant' ? BRAND : FAIL;
 
     const cells: { text: string; colour: ReturnType<typeof rgb>; bold?: boolean }[] = [
       { text: when.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }), colour: MUTED },
@@ -509,14 +507,6 @@ export const buildInspectionPdf = async (input: PdfInput): Promise<Uint8Array> =
   const cursor = newPage(doc);
   drawHeader(cursor, fonts, input);
   drawStats(cursor, fonts, input.stats);
-
-  if (input.stats.missedPlates.length > 0) {
-    cursor.page.drawText(
-      `Not inspected in this period (${input.stats.missedPlates.length}): ${input.stats.missedPlates.join(', ')}`,
-      { x: MARGIN, y: cursor.y, size: 8, font: fonts.bold, color: HOLD },
-    );
-    cursor.y -= 22;
-  }
 
   const afterTable = drawTable(doc, cursor, fonts, input.records);
   await drawEvidence(doc, afterTable, fonts, input.records);
