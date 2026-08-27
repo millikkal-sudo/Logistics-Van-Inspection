@@ -26,8 +26,9 @@ const FAILURE_DETAIL_THRESHOLD = 3;
 const TEMP_MAX_C = 5;
 
 export type AreaReportInput = {
-  areaId: string;
-  areaName: string;
+  /** Omitted for a whole-shift report across every area visited. */
+  areaId?: string;
+  areaName?: string;
   note?: string;
   /** Origin of the deployment, so the report can link back to the record. */
   origin?: string;
@@ -271,14 +272,17 @@ export const buildAreaReport = async (
   // current window is empty, report on the one before it.
   const currentRecords = await listInspectionsSince(current.from, {
     until: current.to,
-    areaId: input.areaId,
+    ...(input.areaId === undefined ? {} : { areaId: input.areaId }),
   });
 
   const shift = currentRecords.length > 0 ? current : previousShift(current);
   const records =
     currentRecords.length > 0
       ? currentRecords
-      : await listInspectionsSince(shift.from, { until: shift.to, areaId: input.areaId });
+      : await listInspectionsSince(shift.from, {
+          until: shift.to,
+          ...(input.areaId === undefined ? {} : { areaId: input.areaId }),
+        });
 
   const stats = await getReportStats(shift.from, shift.to, input.areaId);
 
@@ -288,14 +292,15 @@ export const buildAreaReport = async (
       : `*Inspector's notes:* ${input.note.trim()}`;
 
   const dateLabel = shiftDateLabel(shift);
-  const heading = `${input.areaName}, ${shift.label.toLowerCase()} pre-departure`;
+  const scope = input.areaName ?? 'All areas';
+  const heading = `${scope}, ${shift.label.toLowerCase()} pre-departure`;
 
   if (records.length === 0) {
     const lines = [
       `*${heading}*`,
       `${dateLabel} · ${inspector.fullName}`,
       '',
-      ':warning: *No vans inspected in this area this shift.*',
+      ':warning: *No vans inspected this shift.*',
     ];
     if (noteLine !== null) {
       lines.push('', noteLine);
@@ -309,7 +314,8 @@ export const buildAreaReport = async (
   const cleared = records.filter((record) => record.status === 'compliant').length;
   const nonCompliant = records.length - cleared;
 
-  const previous = await previousRound(input.areaId, shift.from);
+  const previous =
+    input.areaId === undefined ? null : await previousRound(input.areaId, shift.from);
   const trend =
     previous === null
       ? ''
@@ -343,7 +349,7 @@ export const buildAreaReport = async (
     value.length >= width ? value : value + ' '.repeat(width - value.length);
 
   const lines: string[] = [
-    `${icon} *${input.areaName}*  ·  ${shift.label} shift`,
+    `${icon} *${scope}*  ·  ${shift.label} shift`,
     `${dateLabel}  ·  ${inspector.fullName}`,
     '',
   ];
@@ -390,17 +396,49 @@ export const buildAreaReport = async (
   }
   lines.push('```', ...metrics, '```');
 
+  // Where a round covered several areas, the totals alone hide which one
+  // is dragging. One line each, so the weak area is visible at a glance.
+  const areaNames = [...new Set(records.map((record) => record.areaName))].sort();
+
+  if (areaNames.length > 1) {
+    const nameWidth = Math.max(...areaNames.map((name) => name.length)) + 3;
+
+    const rows = areaNames.map((name) => {
+      const forArea = records.filter((record) => record.areaName === name);
+      const clearedHere = forArea.filter((record) => record.status === 'compliant').length;
+      const pct = Math.round((clearedHere / forArea.length) * 100);
+      return `${pad(name, nameWidth)}${pad(`${forArea.length} van${forArea.length === 1 ? '' : 's'}`, 11)}${pad(`${clearedHere} cleared`, 13)}${pct}%`;
+    });
+
+    lines.push(
+      '',
+      '*By area*',
+      '```',
+      ...rows,
+      `${pad('', Math.max(...areaNames.map((n) => n.length)) + 3)}${pad(`${records.length} vans`, 11)}${pad(`${cleared} cleared`, 13)}${stats.compliancePct}%`,
+      '```',
+    );
+  }
+
   const failing = records.filter((record) => record.status !== 'compliant');
 
   if (failing.length > 0) {
     const plateWidth = Math.max(...failing.map((record) => record.plate.length)) + 3;
     const nameWidth = Math.max(...failing.map((record) => record.driverName.length)) + 3;
 
+    const multiArea = new Set(records.map((record) => record.areaName)).size > 1;
+    const areaWidth = multiArea
+      ? Math.max(...failing.map((record) => record.areaName.length)) + 3
+      : 0;
+
     lines.push('', '*Non-compliant*', '```');
     for (const record of failing) {
       const deviation = byDriver.get(record.driverName);
       const checks = deviation === undefined ? '' : [...new Set(deviation.items)].join(', ');
-      lines.push(`${pad(record.plate, plateWidth)}${pad(record.driverName, nameWidth)}${checks}`);
+      const prefix = multiArea ? pad(record.areaName, areaWidth) : '';
+      lines.push(
+        `${prefix}${pad(record.plate, plateWidth)}${pad(record.driverName, nameWidth)}${checks}`,
+      );
     }
     lines.push('```');
   }
@@ -517,7 +555,10 @@ export const buildAreaReport = async (
   return { text: summary, messages, photoCount: evidence.length };
 };
 
-export const postAreaReport = async (report: BuiltReport, areaId: string): Promise<void> => {
+export const postAreaReport = async (
+  report: BuiltReport,
+  areaId: string | null,
+): Promise<void> => {
   const webhook = process.env.SLACK_WEBHOOK_URL;
   const channel = process.env.SLACK_ALERT_CHANNEL ?? '#uae-fleet-ops';
   const db = serviceClient();
