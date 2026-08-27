@@ -56,7 +56,8 @@ type Detail = {
 const STATUS_META: Record<InspectionStatus, { label: string; text: string; bg: string }> = {
   compliant: { label: 'Cleared', text: 'text-pass', bg: 'bg-pass-soft' },
   noncompliant: { label: 'Non-compliant', text: 'text-fail', bg: 'bg-fail-soft' },
-  action_required: { label: 'Held', text: 'text-hold', bg: 'bg-hold-soft' },
+  // Retired. Kept so historic records still render.
+  action_required: { label: 'Non-compliant', text: 'text-fail', bg: 'bg-fail-soft' },
 };
 
 const isoDaysAgo = (days: number): string =>
@@ -248,12 +249,8 @@ type Stats = {
   checks: number;
   cleared: number;
   nonCompliant: number;
-  held: number;
   compliancePct: number;
   vansCovered: number;
-  vansActive: number;
-  coveragePct: number;
-  missedPlates: string[];
   worstTempC: number | null;
 };
 
@@ -345,7 +342,6 @@ const Reports = ({ areas }: { areas: Area[] }) => {
   const [areaId, setAreaId] = useState('');
   const [data, setData] = useState<ReportPayload | null>(null);
   const [loading, setLoading] = useState(false);
-  const [showMissed, setShowMissed] = useState(false);
 
   const params = (): string => {
     const search = new URLSearchParams({ from, to });
@@ -466,73 +462,43 @@ const Reports = ({ areas }: { areas: Area[] }) => {
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Tile
-              label="Fleet covered"
-              value={`${data.stats.coveragePct}%`}
-              caption={`${data.stats.vansCovered} of ${data.stats.vansActive} active vans`}
-              delta={data.stats.coveragePct - data.previous.coveragePct}
-              tone={data.stats.coveragePct >= 95 ? 'pass' : data.stats.coveragePct >= 80 ? 'hold' : 'fail'}
+              label="Vans checked"
+              value={String(data.stats.vansCovered)}
+              caption={`${data.stats.checks} inspection${data.stats.checks === 1 ? '' : 's'}`}
+              delta={data.stats.vansCovered - data.previous.vansCovered}
+              tone="pass"
             />
             <Tile
               label="Compliance"
               value={`${data.stats.compliancePct}%`}
               caption={`${data.stats.cleared} cleared of ${data.stats.checks} checked`}
               delta={data.stats.compliancePct - data.previous.compliancePct}
-              tone={data.stats.compliancePct >= 90 ? 'pass' : data.stats.compliancePct >= 70 ? 'hold' : 'fail'}
+              tone={
+                data.stats.compliancePct >= 90
+                  ? 'pass'
+                  : data.stats.compliancePct >= 70
+                    ? 'hold'
+                    : 'fail'
+              }
             />
             <Tile
-              label="Dispatch held"
-              value={String(data.stats.held)}
-              caption={`${data.stats.nonCompliant} non-compliant`}
-              delta={data.previous.held - data.stats.held}
-              tone={data.stats.held === 0 ? 'pass' : 'hold'}
+              label="Non-compliant"
+              value={String(data.stats.nonCompliant)}
+              caption="failures to close out"
+              delta={data.previous.nonCompliant - data.stats.nonCompliant}
+              tone={data.stats.nonCompliant === 0 ? 'pass' : 'fail'}
             />
             <Tile
               label="Highest temp"
-              value={data.stats.worstTempC === null ? '—' : `${data.stats.worstTempC.toFixed(1)}°C`}
+              value={
+                data.stats.worstTempC === null ? '—' : `${data.stats.worstTempC.toFixed(1)}°C`
+              }
               caption="An average hides the one hot van"
               tone={
-                data.stats.worstTempC === null || data.stats.worstTempC <= 5
-                  ? 'pass'
-                  : 'fail'
+                data.stats.worstTempC === null || data.stats.worstTempC <= 5 ? 'pass' : 'fail'
               }
             />
           </div>
-
-          {data.stats.missedPlates.length > 0 && (
-            <div className="rounded-md border border-line bg-hold-soft p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-bold text-hold">
-                    {data.stats.missedPlates.length} van
-                    {data.stats.missedPlates.length === 1 ? '' : 's'} never inspected in this period
-                  </div>
-                  <p className="mt-0.5 text-xs text-content-secondary">
-                    An uninspected van is a bigger unknown than a failed one.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowMissed(!showMissed)}
-                  className="rounded-sm border border-line bg-surface-card px-4 py-2 text-xs font-bold text-content"
-                >
-                  {showMissed ? 'Hide' : 'Show plates'}
-                </button>
-              </div>
-
-              {showMissed && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {data.stats.missedPlates.map((plate) => (
-                    <span
-                      key={plate}
-                      className="rounded-full bg-surface-card px-3 py-1 text-xs font-bold text-content"
-                    >
-                      {plate}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
 
           <div className="overflow-x-auto rounded-md border border-line bg-surface-card">
             <table className="w-full text-left text-sm">
