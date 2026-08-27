@@ -37,6 +37,17 @@ type Outcome = {
 
 type Screen = 'areas' | 'vans' | 'check' | 'outcome' | 'report';
 
+/** The shift report send, shared by the area list and the report screen. */
+type SlackSend = {
+  sending: boolean;
+  sent: boolean;
+  note: string;
+  error: string | null;
+  photoCount: number;
+  onNote: (value: string) => void;
+  onSend: () => void;
+};
+
 const STATUS_META: Record<InspectionStatus, { label: string; text: string; bg: string; solid: string }> = {
   compliant: { label: 'Cleared', text: 'text-pass', bg: 'bg-pass-soft', solid: 'bg-pass' },
   noncompliant: { label: 'Non-compliant', text: 'text-fail', bg: 'bg-fail-soft', solid: 'bg-fail' },
@@ -93,6 +104,58 @@ export const VanCheckApp = ({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [sendNote, setSendNote] = useState('');
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [photoCount, setPhotoCount] = useState(0);
+
+  /**
+   * Always covers the whole shift, whichever screen it is pressed from.
+   * One send at the end of a round beats remembering to send per area.
+   */
+  const sendToSlack = async (): Promise<void> => {
+    setSending(true);
+    setSendError(null);
+    try {
+      const response = await fetch('/api/reports/slack', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: sendNote }),
+      });
+      const body: unknown = await response.json();
+
+      if (!response.ok) {
+        setSendError(
+          typeof body === 'object' && body !== null && 'error' in body
+            ? String((body as { error: unknown }).error)
+            : 'Could not send the report',
+        );
+        return;
+      }
+
+      setPhotoCount(
+        typeof body === 'object' && body !== null && 'photoCount' in body
+          ? Number((body as { photoCount: unknown }).photoCount)
+          : 0,
+      );
+      setSent(true);
+    } catch {
+      setSendError('Could not reach the server');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const slack = {
+    sending,
+    sent,
+    note: sendNote,
+    error: sendError,
+    photoCount,
+    onNote: setSendNote,
+    onSend: () => void sendToSlack(),
+  };
   const [notes, setNotes] = useState('');
   const [training, setTraining] = useState<TrainingFlag>('none');
 
@@ -165,6 +228,9 @@ export const VanCheckApp = ({
     setNotes('');
     setTraining('none');
     setError(null);
+    // A new check means the round has moved on, so the report can be
+    // sent again rather than staying stuck on "Report sent".
+    setSent(false);
     setScreen('check');
   };
 
@@ -275,6 +341,7 @@ export const VanCheckApp = ({
             areas={areas}
             fleet={fleet}
             today={today}
+            slack={slack}
             canManage={canManage}
             onPick={(picked) => {
               setArea(picked);
@@ -330,6 +397,11 @@ export const VanCheckApp = ({
             onBack={() => setScreen('vans')}
             onSubmit={() => void submit()}
             onError={setError}
+            onCorrected={(plate, driverName) =>
+              setVan((current) =>
+                current === null ? null : { ...current, plate, driverName },
+              )
+            }
           />
         )}
 
@@ -348,6 +420,7 @@ export const VanCheckApp = ({
           <Report
             today={today}
             area={area}
+            slack={slack}
             shiftLabel={shiftLabel}
             tempMin={tempMin}
             tempMax={tempMax}
@@ -366,11 +439,13 @@ const Header = ({
   title,
   sub,
   onBack,
+  children,
 }: {
   eyebrow: string;
   title: string;
   sub: string;
   onBack?: () => void;
+  children?: React.ReactNode;
 }) => (
   <header className="bg-brand-bold px-5 pb-5 pt-5">
     <div className="mb-4 flex items-center justify-between">
@@ -396,9 +471,59 @@ const Header = ({
         </div>
         <h1 className="truncate text-xl font-bold leading-tight text-content-invert">{title}</h1>
         <div className="truncate text-xs text-content-invert-secondary">{sub}</div>
+        {children}
       </div>
     </div>
   </header>
+);
+
+const SlackPanel = ({
+  slack,
+  areasVisited,
+  shiftLabel,
+}: {
+  slack: SlackSend;
+  areasVisited: string[];
+  shiftLabel: string;
+}) => (
+  <div className="rounded-xl border border-line bg-surface-card p-4">
+    <div className="text-sm font-bold text-content">
+      Send {shiftLabel.toLowerCase()} report to Slack
+    </div>
+    <div className="mt-0.5 text-xs text-content-secondary">
+      Everything checked this shift: {areasVisited.join(', ')}.
+    </div>
+
+    <textarea
+      value={slack.note}
+      onChange={(event) => slack.onNote(event.target.value)}
+      rows={2}
+      placeholder="How did the round go? (optional)"
+      disabled={slack.sent}
+      className="mt-3 w-full resize-none rounded-lg border border-line bg-surface-page p-3 text-sm text-content outline-none disabled:opacity-60"
+    />
+
+    {slack.error !== null && (
+      <div className="mt-2 rounded-lg bg-fail-soft p-3 text-sm font-medium text-fail">
+        {slack.error}
+      </div>
+    )}
+
+    <button
+      type="button"
+      onClick={slack.onSend}
+      disabled={slack.sending || slack.sent}
+      className="mt-3 w-full rounded-xl bg-brand-action py-3.5 text-sm font-bold text-content-invert disabled:bg-pass-soft disabled:text-pass"
+    >
+      {slack.sent ? 'Report sent' : slack.sending ? 'Sending…' : 'Send report to Slack'}
+    </button>
+
+    {slack.sent && (
+      <p className="mt-2 text-center text-xs text-content-secondary">
+        Posted with {slack.photoCount} photo{slack.photoCount === 1 ? '' : 's'}.
+      </p>
+    )}
+  </div>
 );
 
 const Chip = ({ status }: { status: InspectionStatus }) => {
@@ -418,6 +543,7 @@ const AreaList = ({
   areas,
   fleet,
   today,
+  slack,
   canManage,
   onPick,
 }: {
@@ -426,6 +552,7 @@ const AreaList = ({
   areas: Area[];
   fleet: FleetEntry[];
   today: InspectionSummary[];
+  slack: SlackSend;
   canManage: boolean;
   onPick: (area: Area) => void;
 }) => (
@@ -466,6 +593,14 @@ const AreaList = ({
           </button>
         );
       })}
+
+      {today.length > 0 && (
+        <SlackPanel
+          slack={slack}
+          areasVisited={[...new Set(today.map((record) => record.areaName))].sort()}
+          shiftLabel={shiftLabel}
+        />
+      )}
 
       {canManage && (
         <a
@@ -606,6 +741,124 @@ const VanList = ({
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'del'];
 
+/**
+ * Corrects the plate or the driver's name from the check screen.
+ *
+ * The yard is where a wrong plate gets noticed. Making the inspector
+ * finish a round against a record they know is wrong, and remember to
+ * report it afterwards, is how bad data stays.
+ *
+ * Names only. Area and van assignment stay with managers, because those
+ * change who is due for inspection.
+ */
+const CorrectDetails = ({
+  van,
+  onCorrected,
+}: {
+  van: FleetEntry;
+  onCorrected: (plate: string, driverName: string) => void;
+}) => {
+  const [open, setOpen] = useState(false);
+  const [plate, setPlate] = useState(van.plate);
+  const [driverName, setDriverName] = useState(van.driverName);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+
+    const send = async (target: 'van' | 'driver', id: string, value: string): Promise<boolean> => {
+      const response = await fetch('/api/correction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target, id, value }),
+      });
+      if (response.ok) {
+        return true;
+      }
+      const body: unknown = await response.json();
+      setError(
+        typeof body === 'object' && body !== null && 'error' in body
+          ? String((body as { error: unknown }).error)
+          : 'Could not save the correction',
+      );
+      return false;
+    };
+
+    try {
+      if (plate.trim() !== van.plate && !(await send('van', van.vanId, plate))) {
+        return;
+      }
+      if (driverName.trim() !== van.driverName && !(await send('driver', van.driverId, driverName))) {
+        return;
+      }
+      onCorrected(plate.trim().toUpperCase(), driverName.trim());
+      setOpen(false);
+    } catch {
+      setError('Could not reach the server');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-2 text-xs font-bold text-content-invert-secondary underline"
+      >
+        Wrong plate or name?
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-2 rounded-lg bg-invert-subtle p-3">
+      <input
+        value={plate}
+        onChange={(event) => setPlate(event.target.value.toUpperCase())}
+        aria-label="Plate"
+        className="w-full rounded-lg border border-line bg-surface-card px-3 py-2 text-sm text-content outline-none"
+      />
+      <input
+        value={driverName}
+        onChange={(event) => setDriverName(event.target.value)}
+        aria-label="Driver name"
+        className="w-full rounded-lg border border-line bg-surface-card px-3 py-2 text-sm text-content outline-none"
+      />
+
+      {error !== null && (
+        <div className="rounded-lg bg-fail-soft p-2 text-xs font-medium text-fail">{error}</div>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={busy}
+          className="flex-1 rounded-lg bg-surface-card py-2 text-xs font-bold text-brand"
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setPlate(van.plate);
+            setDriverName(van.driverName);
+            setError(null);
+            setOpen(false);
+          }}
+          className="flex-1 rounded-lg py-2 text-xs font-bold text-content-invert-secondary"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const Checklist = ({
   van,
   checkItems,
@@ -635,6 +888,7 @@ const Checklist = ({
   onBack,
   onSubmit,
   onError,
+  onCorrected,
 }: {
   van: FleetEntry;
   checkItems: CheckItem[];
@@ -664,6 +918,7 @@ const Checklist = ({
   onBack: () => void;
   onSubmit: () => void;
   onError: (message: string) => void;
+  onCorrected: (plate: string, driverName: string) => void;
 }) => {
   let label = 'Submit check';
   if (saving) {
@@ -683,7 +938,9 @@ const Checklist = ({
         title={van.plate}
         sub={van.helperName === null ? van.driverName : `${van.driverName} + ${van.helperName}`}
         onBack={onBack}
-      />
+      >
+        <CorrectDetails van={van} onCorrected={onCorrected} />
+      </Header>
 
       <div className="px-5 pt-4">
         <div className="h-1.5 overflow-hidden rounded-full bg-line">
@@ -1113,6 +1370,7 @@ const OutcomeView = ({
 const Report = ({
   today,
   area,
+  slack,
   shiftLabel,
   tempMin,
   tempMax,
@@ -1120,53 +1378,12 @@ const Report = ({
 }: {
   today: InspectionSummary[];
   area: Area | null;
+  slack: SlackSend;
   shiftLabel: string;
   tempMin: number;
   tempMax: number;
   onBack: () => void;
 }) => {
-  const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
-  const [note, setNote] = useState('');
-  const [sendError, setSendError] = useState<string | null>(null);
-  const [photoCount, setPhotoCount] = useState(0);
-
-  const sendToSlack = async (): Promise<void> => {
-    setSending(true);
-    setSendError(null);
-    try {
-      const response = await fetch('/api/reports/slack', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // No area: the report covers every area visited this shift, so
-        // one send at the end of the round replaces remembering to send
-        // per area.
-        body: JSON.stringify({ note }),
-      });
-      const body: unknown = await response.json();
-
-      if (!response.ok) {
-        const message =
-          typeof body === 'object' && body !== null && 'error' in body
-            ? String((body as { error: unknown }).error)
-            : 'Could not send the report';
-        setSendError(message);
-        return;
-      }
-
-      const photos =
-        typeof body === 'object' && body !== null && 'photoCount' in body
-          ? Number((body as { photoCount: unknown }).photoCount)
-          : 0;
-      setPhotoCount(photos);
-      setSent(true);
-    } catch {
-      setSendError('Could not reach the server');
-    } finally {
-      setSending(false);
-    }
-  };
-
   const records = area === null ? today : today.filter((r) => r.areaName === area.name);
   // The send always covers the whole shift, so the button names every
   // area it will include rather than just the one being viewed.
@@ -1257,46 +1474,8 @@ const Report = ({
           </div>
         )}
 
-        {today.length > 0 && (
-          <div className="rounded-xl border border-line bg-surface-card p-4">
-            <div className="text-sm font-bold text-content">
-              Send {shiftLabel.toLowerCase()} report to Slack
-            </div>
-            <div className="mt-0.5 text-xs text-content-secondary">
-              Everything checked this shift, across all {areasVisited.length} area
-              {areasVisited.length === 1 ? '' : 's'}: {areasVisited.join(', ')}.
-            </div>
-
-            <textarea
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-              rows={2}
-              placeholder="How did the round go? (optional)"
-              disabled={sent}
-              className="mt-3 w-full resize-none rounded-lg border border-line bg-surface-page p-3 text-sm text-content outline-none disabled:opacity-60"
-            />
-
-            {sendError !== null && (
-              <div className="mt-2 rounded-lg bg-fail-soft p-3 text-sm font-medium text-fail">
-                {sendError}
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={() => void sendToSlack()}
-              disabled={sending || sent}
-              className="mt-3 w-full rounded-xl bg-brand-action py-3.5 text-sm font-bold text-content-invert disabled:bg-pass-soft disabled:text-pass"
-            >
-              {sent ? 'Report sent' : sending ? 'Sending…' : 'Send report to Slack'}
-            </button>
-
-            {sent && (
-              <p className="mt-2 text-center text-xs text-content-secondary">
-                Posted to Slack with {photoCount} photo{photoCount === 1 ? '' : 's'}.
-              </p>
-            )}
-          </div>
+        {records.length > 0 && (
+          <SlackPanel slack={slack} areasVisited={areasVisited} shiftLabel={shiftLabel} />
         )}
 
         <button
