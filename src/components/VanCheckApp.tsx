@@ -1132,16 +1132,16 @@ const Report = ({
   const [photoCount, setPhotoCount] = useState(0);
 
   const sendToSlack = async (): Promise<void> => {
-    if (area === null) {
-      return;
-    }
     setSending(true);
     setSendError(null);
     try {
       const response = await fetch('/api/reports/slack', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ areaId: area.id, areaName: area.name, note }),
+        // No area: the report covers every area visited this shift, so
+        // one send at the end of the round replaces remembering to send
+        // per area.
+        body: JSON.stringify({ note }),
       });
       const body: unknown = await response.json();
 
@@ -1168,6 +1168,9 @@ const Report = ({
   };
 
   const records = area === null ? today : today.filter((r) => r.areaName === area.name);
+  // The send always covers the whole shift, so the button names every
+  // area it will include rather than just the one being viewed.
+  const areasVisited = [...new Set(today.map((record) => record.areaName))].sort();
 
   const counts: Record<InspectionStatus, number> = {
     compliant: 0,
@@ -1254,13 +1257,14 @@ const Report = ({
           </div>
         )}
 
-        {area !== null && records.length > 0 && (
+        {today.length > 0 && (
           <div className="rounded-xl border border-line bg-surface-card p-4">
             <div className="text-sm font-bold text-content">
-              Send {area.name} {shiftLabel.toLowerCase()} report to Slack
+              Send {shiftLabel.toLowerCase()} report to Slack
             </div>
             <div className="mt-0.5 text-xs text-content-secondary">
-              Compliance, gaps, and deviations by driver for the whole round.
+              Everything checked this shift, across all {areasVisited.length} area
+              {areasVisited.length === 1 ? '' : 's'}: {areasVisited.join(', ')}.
             </div>
 
             <textarea
