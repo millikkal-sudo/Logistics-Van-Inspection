@@ -280,7 +280,7 @@ export const buildAreaReport = async (
       ? currentRecords
       : await listInspectionsSince(shift.from, { until: shift.to, areaId: input.areaId });
 
-  const stats = await getReportStats(shift.from, shift.to, input.areaId, shift.slot);
+  const stats = await getReportStats(shift.from, shift.to, input.areaId);
 
   const noteLine =
     input.note === undefined || input.note.trim() === ''
@@ -379,7 +379,7 @@ export const buildAreaReport = async (
   // Metrics in a code block so the columns line up. A wall of prose
   // numbers is what made the old version hard to scan.
   const metrics: string[] = [
-    `${pad('Coverage', 14)}${pad(`${stats.vansCovered} / ${stats.vansActive} due`, 18)}${stats.coveragePct}%`,
+    `${pad('Coverage', 14)}${pad(`${stats.vansCovered} / ${stats.vansActive} vans`, 18)}${stats.coveragePct}%`,
     `${pad('Cleared', 14)}${pad(`${cleared} / ${records.length} checked`, 18)}${stats.compliancePct}%`,
   ];
   if (held > 0) {
@@ -402,11 +402,6 @@ export const buildAreaReport = async (
     metrics.push(
       `${pad('vs ' + previous.label, 14)}${delta === 0 ? 'no change' : `${delta > 0 ? '+' : ''}${delta} points`}`,
     );
-  }
-  if (stats.notDueCount > 0) {
-    // Stated rather than silently excluded: hiding them would make
-    // coverage look perfect without anyone checking the split is right.
-    metrics.push(`${pad('Not due', 14)}${plural(stats.notDueCount, 'van')} on other shifts`);
   }
   lines.push('```', ...metrics, '```');
 

@@ -113,3 +113,4 @@ export const shiftDateLabel = (shift: Shift): string =>
  */
 export const previousShift = (shift: Shift): Shift =>
   resolveShift(new Date(shift.from.getTime() - 60 * 1000));
+

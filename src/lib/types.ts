@@ -23,20 +23,8 @@ export type Area = {
   code: string;
   active: boolean;
   sortOrder: number;
-  /** How often this area should be visited. 1 means daily. */
-  visitIntervalDays: number;
 };
 
-/** Where an area sits against its cadence. */
-export type AreaRotation = {
-  areaId: string;
-  areaName: string;
-  areaCode: string;
-  visitIntervalDays: number;
-  lastVisitedAt: string | null;
-  daysSince: number | null;
-  overdue: boolean;
-};
 
 export type VehicleType = 'van' | 'truck';
 
@@ -44,8 +32,6 @@ export type Van = {
   id: string;
   plate: string;
   vehicleType: VehicleType;
-  /** Which shifts this vehicle runs. Defaults to all three. */
-  shiftSlots: string[];
   areaId: string | null;
   tempMinC: number;
   tempMaxC: number;
