@@ -1,3 +1,4 @@
+import { describeInspection } from './fleetRepository';
 import { serviceClient } from './supabaseClients';
 import {
   isDispatchBlocked,
@@ -125,6 +126,11 @@ export const submitInspection = async (
     itemsByCode.has(answer.checkItemCode),
   );
   const status = resolveStatus(applicableAnswers, checkItems);
+  const context = await describeInspection(
+    submission.vanId,
+    submission.driverId,
+    submission.helperId,
+  );
   const blocked = isDispatchBlocked(status);
   const db = serviceClient();
 
@@ -134,6 +140,12 @@ export const submitInspection = async (
       van_id: submission.vanId,
       driver_id: submission.driverId,
       helper_id: submission.helperId ?? null,
+      // Copied onto the record, not just linked. The van can be deleted
+      // or renamed later; the check must still read correctly.
+      van_plate_text: context.plate,
+      driver_name_text: context.driverName,
+      helper_name_text: context.helperName,
+      area_name_text: context.areaName,
       training_flag: submission.trainingFlag ?? 'none',
       area_id: submission.areaId ?? null,
       inspector_id: inspector.id,
@@ -421,10 +433,8 @@ export type ReportStats = {
   vansCovered: number;
   vansActive: number;
   coveragePct: number;
-  /** Vans due this shift that were never inspected. */
+  /** Vans that exist and were never inspected in the window. */
   missedPlates: string[];
-  /** Vans that exist but do not run this shift. Not a gap. */
-  notDueCount: number;
   worstTempC: number | null;
 };
 
@@ -439,8 +449,6 @@ export const getReportStats = async (
   from: Date,
   to: Date,
   areaId?: string,
-  /** Restricts the denominator to vans that run this shift. */
-  shiftSlot?: string,
 ): Promise<ReportStats> => {
   const db = serviceClient();
 
@@ -449,7 +457,7 @@ export const getReportStats = async (
     ...(areaId === undefined ? {} : { areaId }),
   });
 
-  let vanQuery = db.from('vans').select('plate, shift_slots').eq('active', true);
+  let vanQuery = db.from('vans').select('plate').eq('active', true);
   if (areaId !== undefined) {
     vanQuery = vanQuery.eq('area_id', areaId);
   }
@@ -459,20 +467,7 @@ export const getReportStats = async (
     throw new Error(`Could not count the fleet: ${error.message}`);
   }
 
-  type VanShiftRow = { plate: string; shift_slots: string[] | null };
-  const allVans = (vans ?? []) as VanShiftRow[];
-
-  // Twenty Dubai vans run evenings and ten run early mornings. Counting
-  // all thirty against an evening round reported ten missing that were
-  // never due.
-  const dueVans =
-    shiftSlot === undefined
-      ? allVans
-      : allVans.filter((van) =>
-          (van.shift_slots ?? ['early_morning', 'morning', 'evening']).includes(shiftSlot),
-        );
-
-  const activePlates = dueVans.map((van) => van.plate);
+  const activePlates = (vans ?? []).map((van: { plate: string }) => van.plate);
   const coveredPlates = new Set(records.map((record) => record.plate));
 
   // Only count vans that are still active. A van checked last month and
@@ -501,7 +496,6 @@ export const getReportStats = async (
     vansActive: activePlates.length,
     coveragePct: pct(covered.length, activePlates.length),
     missedPlates: missed.sort(),
-    notDueCount: allVans.length - dueVans.length,
     worstTempC: temps.length === 0 ? null : Math.max(...temps),
   };
 };
