@@ -39,9 +39,7 @@ type Evidence = {
   driverName: string;
   checkLabel: string;
   causeLabel: string | null;
-  actionLabel: string | null;
-  note: string | null;
-  url: string;
+  storageKey: string;
 };
 
 type Deviation = { name: string; count: number; items: string[] };
@@ -112,6 +110,13 @@ const nameList = (names: string[]): string => {
 
 const plural = (count: number, word: string): string =>
   `${count} ${word}${count === 1 ? '' : 's'}`;
+
+/**
+ * "vehicle", not "van". The fleet is vans and transfer trucks, and a
+ * truck counted as a van makes the numbers untrustworthy to anyone who
+ * knows what was actually inspected.
+ */
+const vehicles = (count: number): string => plural(count, 'vehicle');
 
 type FailureRow = {
   inspection_id: string;
@@ -194,21 +199,13 @@ const gather = async (
     byDriver.set(record.driverName, existing);
 
     for (const photo of raw.inspection_photos ?? []) {
-      const { data: signed } = await db.storage
-        .from(BUCKET)
-        .createSignedUrl(photo.storage_key, SIGNED_URL_TTL_SECONDS);
-
-      if (signed !== null) {
-        evidence.push({
-          plate: record.plate,
-          driverName: record.driverName,
-          checkLabel: label,
-          causeLabel: cause,
-          actionLabel: causeOf(raw.check_actions),
-          note: raw.note,
-          url: signed.signedUrl,
-        });
-      }
+      evidence.push({
+        plate: record.plate,
+        driverName: record.driverName,
+        checkLabel: label,
+        causeLabel: cause,
+        storageKey: photo.storage_key,
+      });
     }
   }
 
@@ -263,9 +260,132 @@ const previousRound = async (
   };
 };
 
+type Observation = {
+  checkCode: string;
+  checkLabel: string;
+  causeLabel: string | null;
+  actionLabel: string | null;
+  numericValue: number | null;
+};
+
+type Repeat = { plate: string; driverName: string; checkLabel: string; count: number };
+
+/**
+ * What failed on each vehicle, in the inspector's own words: the check,
+ * the cause they picked and what they did about it.
+ */
+const listObservations = async (
+  records: InspectionSummary[],
+): Promise<Map<string, Observation[]>> => {
+  const out = new Map<string, Observation[]>();
+  const ids = records.filter((record) => record.failedCount > 0).map((record) => record.id);
+
+  if (ids.length === 0) {
+    return out;
+  }
+
+  const { data } = await serviceClient()
+    .from('inspection_results')
+    .select(
+      'inspection_id, numeric_value, check_items(code, label), check_causes(label), check_actions(label)',
+    )
+    .in('inspection_id', ids)
+    .eq('passed', false);
+
+  type Row = {
+    inspection_id: string;
+    numeric_value: number | null;
+    check_items: { code: string; label: string } | { code: string; label: string }[] | null;
+    check_causes: { label: string } | { label: string }[] | null;
+    check_actions: { label: string } | { label: string }[] | null;
+  };
+
+  const first = <T,>(value: T | T[] | null): T | null =>
+    value === null ? null : Array.isArray(value) ? (value[0] ?? null) : value;
+
+  for (const raw of (data ?? []) as unknown as Row[]) {
+    const item = first(raw.check_items);
+    const entry: Observation = {
+      checkCode: item?.code ?? '',
+      checkLabel: item?.label ?? 'Check',
+      causeLabel: first(raw.check_causes)?.label ?? null,
+      actionLabel: first(raw.check_actions)?.label ?? null,
+      numericValue: raw.numeric_value === null ? null : Number(raw.numeric_value),
+    };
+    out.set(raw.inspection_id, [...(out.get(raw.inspection_id) ?? []), entry]);
+  }
+
+  return out;
+};
+
+/**
+ * The same vehicle failing the same check more than once in 30 days.
+ *
+ * A single failure is an incident. The same one recurring is a pattern,
+ * and a pattern is the thing worth acting on.
+ */
+const listRepeats = async (records: InspectionSummary[]): Promise<Repeat[]> => {
+  const plates = new Set(records.map((record) => record.plate));
+  if (plates.size === 0) {
+    return [];
+  }
+
+  const since = new Date();
+  since.setDate(since.getDate() - 30);
+
+  const history = await listInspectionsSince(since);
+  const relevant = history.filter(
+    (record) => plates.has(record.plate) && record.failedCount > 0,
+  );
+
+  if (relevant.length === 0) {
+    return [];
+  }
+
+  const { data } = await serviceClient()
+    .from('inspection_results')
+    .select('inspection_id, check_items(label)')
+    .in(
+      'inspection_id',
+      relevant.map((record) => record.id),
+    )
+    .eq('passed', false);
+
+  type Row = { inspection_id: string; check_items: { label: string } | { label: string }[] | null };
+
+  const tally = new Map<string, Repeat>();
+
+  for (const raw of (data ?? []) as unknown as Row[]) {
+    const relation = raw.check_items;
+    const label = Array.isArray(relation)
+      ? (relation[0]?.label ?? 'Check')
+      : (relation?.label ?? 'Check');
+
+    const record = relevant.find((candidate) => candidate.id === raw.inspection_id);
+    if (record === undefined) {
+      continue;
+    }
+
+    const key = `${record.plate}|${label}`;
+    const existing = tally.get(key);
+    tally.set(key, {
+      plate: record.plate,
+      driverName: record.driverName,
+      checkLabel: label,
+      count: (existing?.count ?? 0) + 1,
+    });
+  }
+
+  return [...tally.values()]
+    .filter((entry) => entry.count > 1)
+    .sort((a, b) => b.count - a.count);
+};
+
 export type BuiltReport = {
   text: string;
   messages: { text: string; blocks: SlackBlock[] }[];
+  /** Uploaded together so Slack renders them as one file group. */
+  photos: { storageKey: string; title: string }[];
   photoCount: number;
 };
 
@@ -313,16 +433,20 @@ export const buildAreaReport = async (
       `*${shift.label} shift*`,
       `${dateLabel} · ${inspector.fullName}`,
       '',
-      ':warning: *No vans inspected this shift.*',
+      ':warning: *No vehicles inspected this shift.*',
     ];
     if (noteLine !== null) {
       lines.push('', noteLine);
     }
     const text = lines.join('\n');
-    return { text, messages: [{ text, blocks: [section(text)] }], photoCount: 0 };
+    return { text, messages: [{ text, blocks: [section(text)] }], photos: [], photoCount: 0 };
   }
 
   const { byCheck, byCause, byDriver, evidence, failureCount } = await gather(records);
+  const [observations, repeats] = await Promise.all([
+    listObservations(records),
+    listRepeats(records),
+  ]);
 
   const cleared = records.filter((record) => record.status === 'compliant').length;
   const nonCompliant = records.length - cleared;
@@ -355,157 +479,73 @@ export const buildAreaReport = async (
           ? `*Highest temperature: ${worstTemp.toFixed(1)} °C*, within range but at the limit`
           : `*Highest temperature: ${worstTemp.toFixed(1)} °C*, within range`;
 
-  const icon = failureCount > 0 ? ':warning:' : ':white_check_mark:';
+  const vans = records.filter((record) => record.vehicleType !== 'truck');
+  const trucks = records.filter((record) => record.vehicleType === 'truck');
+  const failingVans = vans.filter((record) => record.status !== 'compliant');
+  const failingTrucks = trucks.filter((record) => record.status !== 'compliant');
 
-  /** Pads for the monospace blocks. Slack renders those in a fixed font. */
-  const pad = (value: string, width: number): string =>
-    value.length >= width ? value : value + ' '.repeat(width - value.length);
+  /** "4 Vans & 1 Truck", dropping either side when it is zero. */
+  const fleetCount = (vanCount: number, truckCount: number): string => {
+    const parts: string[] = [];
+    if (vanCount > 0) {
+      parts.push(`${vanCount} Van${vanCount === 1 ? '' : 's'}`);
+    }
+    if (truckCount > 0) {
+      parts.push(`${truckCount} Truck${truckCount === 1 ? '' : 's'}`);
+    }
+    return parts.length === 0 ? 'None' : parts.join(' & ');
+  };
 
   const lines: string[] = [
-    `${icon} *${scope}*  ·  ${shift.label} shift`,
-    `${dateLabel}  ·  ${inspector.fullName}`,
+    `*Vehicle Hygiene & Fleet Inspection Report – ${scope} ${shift.label} Fleet*`,
+    `Date: ${dateLabel}`,
     '',
+    '*Inspection Summary*',
+    `• Total Vehicles Inspected: ${fleetCount(vans.length, trucks.length)}`,
+    `• Non-Conformities Identified: ${fleetCount(failingVans.length, failingTrucks.length)}`,
+    // Vans and trucks scored together: three failures out of ten
+    // vehicles is 70%, whichever type they were.
+    `• Compliance Rate: ${stats.compliancePct}% of inspected vehicles met Calo standards`,
   ];
-
-  // The one sentence someone reads if they read nothing else.
-  const headline: string[] = [
-    nonCompliant === 0
-      ? `*All ${plural(records.length, 'van')} cleared.*`
-      : `*${plural(nonCompliant, 'van')} non-compliant.* ${plural(failureCount, 'failure')} to close out.`,
-  ];
-  // Tagged only when something needs a person. Pinging the channel on a
-  // clean round is how a channel gets muted, which costs the alerts that
-  // matter.
-  const needsAttention = nonCompliant > 0;
-  const mentions = formatMentions(
-    needsAttention ? process.env.SLACK_MENTIONS_ALERT : process.env.SLACK_MENTIONS_ALWAYS,
-  );
-
-  lines.push(mentions === '' ? headline.join(' ') : `${headline.join(' ')} ${mentions}`, '');
-
-  // Metrics in a code block so the columns line up. A wall of prose
-  // numbers is what made the old version hard to scan.
-  const metrics: string[] = [
-    `${pad('Checked', 14)}${pad(`${records.length} van${records.length === 1 ? '' : 's'}`, 18)}`,
-    `${pad('Cleared', 14)}${pad(`${cleared} / ${records.length}`, 18)}${stats.compliancePct}%`,
-  ];
-  if (nonCompliant > 0) {
-    metrics.push(`${pad('Non-compliant', 14)}${nonCompliant}`);
-  }
-  if (worstTemp !== null) {
-    const verdict =
-      worstTemp > TEMP_MAX_C
-        ? 'over limit'
-        : worstTemp === TEMP_MAX_C
-          ? 'at the limit'
-          : 'within range';
-    metrics.push(`${pad('Peak temp', 14)}${pad(`${worstTemp.toFixed(1)} \u00b0C`, 18)}${verdict}`);
-  }
-  if (previous !== null) {
-    const delta = stats.compliancePct - previous.compliancePct;
-    metrics.push(
-      `${pad('vs ' + previous.label, 14)}${delta === 0 ? 'no change' : `${delta > 0 ? '+' : ''}${delta} points`}`,
-    );
-  }
-  lines.push('```', ...metrics, '```');
-
-  // Where a round covered several areas, the totals alone hide which one
-  // is dragging. One line each, so the weak area is visible at a glance.
-  const areaNames = [...new Set(records.map((record) => record.areaName))].sort();
-
-  if (areaNames.length > 1) {
-    const nameWidth = Math.max(...areaNames.map((name) => name.length)) + 3;
-
-    const rows = areaNames.map((name) => {
-      const forArea = records.filter((record) => record.areaName === name);
-      const clearedHere = forArea.filter((record) => record.status === 'compliant').length;
-      const pct = Math.round((clearedHere / forArea.length) * 100);
-      return `${pad(name, nameWidth)}${pad(`${forArea.length} van${forArea.length === 1 ? '' : 's'}`, 11)}${pad(`${clearedHere} cleared`, 13)}${pct}%`;
-    });
-
-    lines.push(
-      '',
-      '*By area*',
-      '```',
-      ...rows,
-      `${pad('', Math.max(...areaNames.map((n) => n.length)) + 3)}${pad(`${records.length} vans`, 11)}${pad(`${cleared} cleared`, 13)}${stats.compliancePct}%`,
-      '```',
-    );
-  }
 
   const failing = records.filter((record) => record.status !== 'compliant');
 
   if (failing.length > 0) {
-    const plateWidth = Math.max(...failing.map((record) => record.plate.length)) + 3;
-    const nameWidth = Math.max(...failing.map((record) => record.driverName.length)) + 3;
+    lines.push('', '*Key Observations*');
 
-    const multiArea = new Set(records.map((record) => record.areaName)).size > 1;
-    const areaWidth = multiArea
-      ? Math.max(...failing.map((record) => record.areaName.length)) + 3
-      : 0;
-
-    lines.push('', '*Non-compliant*', '```');
     for (const record of failing) {
-      const deviation = byDriver.get(record.driverName);
-      const checks = deviation === undefined ? '' : [...new Set(deviation.items)].join(', ');
-      const prefix = multiArea ? pad(record.areaName, areaWidth) : '';
+      const detail = observations.get(record.id) ?? [];
+
+      // Cause and action come from the inspector's own taps, so the line
+      // reads as what they saw rather than a status code.
+      const issues = detail
+        .map((item) => {
+          const parts = [item.checkLabel];
+          if (item.causeLabel !== null) {
+            parts.push(item.causeLabel.toLowerCase());
+          }
+          if (item.numericValue !== null && item.checkCode === 'temp') {
+            parts[0] = `${item.checkLabel} ${item.numericValue.toFixed(1)} °C`;
+          }
+          const line = parts.join(', ');
+          return item.actionLabel === null ? line : `${line}. ${item.actionLabel}`;
+        })
+        .join('. ');
+
+      const note =
+        record.notes === null || record.notes === '' ? '' : ` _${record.notes}_`;
+
+      lines.push(`• *${record.driverName} – ${record.plate}*: ${issues}.${note}`);
+    }
+  }
+
+  if (repeats.length > 0) {
+    lines.push('', '*Repeated Issues*');
+    for (const repeat of repeats) {
       lines.push(
-        `${prefix}${pad(record.plate, plateWidth)}${pad(record.driverName, nameWidth)}${checks}`,
+        `• *${repeat.plate} (${repeat.driverName})*: ${repeat.checkLabel} failed ${repeat.count} times in the last 30 days`,
       );
     }
-    lines.push('```');
-  }
-
-  if (byCheck.size > 0) {
-    lines.push('', '*Main gaps*');
-    for (const [label, count] of [...byCheck.entries()].sort((a, b) => b[1] - a[1])) {
-      const breakdown = byCause.get(label);
-      const named =
-        breakdown === undefined
-          ? []
-          : [...breakdown.entries()].filter(([cause]) => cause.toLowerCase() !== 'other');
-
-      if (named.length > 0) {
-        const detail = named
-          .sort((a, b) => b[1] - a[1])
-          .map(([cause, n]) => `${n} ${cause.toLowerCase()}`)
-          .join(', ');
-        lines.push(`${label}  ${plural(count, 'van')}  _(${detail})_`);
-      } else {
-        // "4 other" told nobody anything. Say what actually happened.
-        lines.push(`${label}  ${plural(count, 'van')}`);
-        lines.push('_no cause recorded_');
-      }
-    }
-  }
-
-  const deviations = [...byDriver.values()]
-    .filter((entry) => entry.count > 1)
-    .sort((a, b) => b.count - a.count);
-
-  if (deviations.length > 0) {
-    lines.push('', '*More than one deviation*');
-    for (const entry of deviations) {
-      lines.push(`${entry.name}  ${entry.count}  _(${[...new Set(entry.items)].join(', ')})_`);
-    }
-  }
-
-
-  const flagged = records.filter((record) => record.trainingFlag !== 'none');
-  if (flagged.length > 0) {
-    lines.push(
-      '',
-      '*Flagged for training*',
-      ...flagged.map((record) => {
-        const who =
-          record.trainingFlag === 'both'
-            ? `${record.driverName} and ${record.helperName ?? 'helper'}`
-            : record.trainingFlag === 'helper'
-              ? (record.helperName ?? 'helper')
-              : record.driverName;
-        return `${who}  _(${record.plate})_`;
-      }),
-    );
   }
 
   if (noteLine !== null) {
@@ -516,56 +556,103 @@ export const buildAreaReport = async (
     lines.push('', `<${input.origin}/admin|View the full record and photos>`);
   }
 
-  const summary = lines.join('\n');
-
-  const imageBlocks: SlackBlock[] = evidence.flatMap((item) => [
-    {
-      type: 'context' as const,
-      elements: [
-        {
-          type: 'mrkdwn' as const,
-          text: `*${item.plate}* · ${item.checkLabel}${
-            item.causeLabel === null ? '' : `: ${item.causeLabel}`
-          } · ${item.driverName}${
-            item.actionLabel === null ? '' : ` · ${item.actionLabel}`
-          }${item.note === null || item.note === '' ? '' : ` · ${item.note}`}`,
-        },
-      ],
-    },
-    { type: 'image' as const, image_url: item.url, alt_text: `${item.plate} ${item.checkLabel}` },
-  ]);
-
-  const messages: BuiltReport['messages'] = [];
-
-  if (imageBlocks.length === 0) {
-    messages.push({ text: summary, blocks: [section(summary)] });
-  } else {
-    const chunks: SlackBlock[][] = [];
-    for (let i = 0; i < imageBlocks.length; i += MAX_IMAGE_BLOCKS_PER_MESSAGE) {
-      chunks.push(imageBlocks.slice(i, i + MAX_IMAGE_BLOCKS_PER_MESSAGE));
-    }
-
-    chunks.forEach((chunk, index) => {
-      if (index === 0) {
-        messages.push({
-          text: summary,
-          blocks: [
-            section(summary),
-            { type: 'divider' },
-            section(`*Evidence* (${plural(evidence.length, 'photo')})`),
-            ...chunk,
-          ],
-        });
-      } else {
-        messages.push({
-          text: `${input.areaName}, evidence continued`,
-          blocks: [section(`*Evidence continued (${index + 1} of ${chunks.length})*`), ...chunk],
-        });
-      }
-    });
+  // Tagged only when something failed. Pinging a clean round is how a
+  // channel gets muted, which costs the alerts that matter.
+  const mentions = formatMentions(
+    failing.length > 0 ? process.env.SLACK_MENTIONS_ALERT : process.env.SLACK_MENTIONS_ALWAYS,
+  );
+  if (mentions !== '') {
+    lines.push('', mentions);
   }
 
-  return { text: summary, messages, photoCount: evidence.length };
+  const summary = lines.join('\n');
+
+  return {
+    text: summary,
+    messages: [{ text: summary, blocks: [section(summary)] }],
+    photos: evidence.map((item) => ({
+      storageKey: item.storageKey,
+      title: `${item.plate} ${item.checkLabel}${item.causeLabel === null ? '' : `: ${item.causeLabel}`}`,
+    })),
+    photoCount: evidence.length,
+  };
+
+};
+
+/**
+ * Uploads every photo in one call so Slack groups them into a single
+ * file attachment, the way a person pasting images does.
+ *
+ * Image blocks cannot produce that: they render one per row, full width,
+ * and a dozen of them buries the report. This needs a bot token, so it
+ * falls back to the webhook when one is not configured.
+ */
+const uploadPhotoGroup = async (
+  token: string,
+  channel: string,
+  photos: { storageKey: string; title: string }[],
+  comment: string,
+): Promise<void> => {
+  const db = serviceClient();
+  const uploaded: { id: string; title: string }[] = [];
+
+  for (const photo of photos) {
+    const download = await db.storage.from(BUCKET).download(photo.storageKey);
+    if (download.error !== null || download.data === null) {
+      continue;
+    }
+
+    const bytes = await download.data.arrayBuffer();
+    const filename = photo.storageKey.split('/').pop() ?? 'evidence.jpg';
+
+    const urlResponse = await fetch('https://slack.com/api/files.getUploadURLExternal', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({ filename, length: String(bytes.byteLength) }),
+    });
+
+    const urlBody = (await urlResponse.json()) as {
+      ok?: boolean;
+      upload_url?: string;
+      file_id?: string;
+      error?: string;
+    };
+
+    if (urlBody.ok !== true || urlBody.upload_url === undefined || urlBody.file_id === undefined) {
+      throw new Error(`Slack upload URL failed: ${urlBody.error ?? 'unknown'}`);
+    }
+
+    const put = await fetch(urlBody.upload_url, { method: 'POST', body: bytes });
+    if (!put.ok) {
+      throw new Error(`Slack rejected a photo (${put.status})`);
+    }
+
+    uploaded.push({ id: urlBody.file_id, title: photo.title });
+  }
+
+  if (uploaded.length === 0) {
+    return;
+  }
+
+  // One completeUpload call with every file: that is what makes Slack
+  // show them as a single grouped attachment rather than separate posts.
+  const complete = await fetch('https://slack.com/api/files.completeUploadExternal', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      files: uploaded,
+      channel_id: channel,
+      initial_comment: comment,
+    }),
+  });
+
+  const body = (await complete.json()) as { ok?: boolean; error?: string };
+  if (body.ok !== true) {
+    throw new Error(`Slack completeUpload failed: ${body.error ?? 'unknown'}`);
+  }
 };
 
 export const postAreaReport = async (
@@ -588,6 +675,22 @@ export const postAreaReport = async (
     });
   };
 
+  const botToken = process.env.SLACK_BOT_TOKEN;
+  const channelId = process.env.SLACK_CHANNEL_ID;
+
+  // Preferred: the report and its photos as one grouped post.
+  if (botToken !== undefined && channelId !== undefined && report.photos.length > 0) {
+    try {
+      await uploadPhotoGroup(botToken, channelId, report.photos, report.text);
+      await log(true, null);
+      return;
+    } catch (cause: unknown) {
+      const message = cause instanceof Error ? cause.message : 'Slack upload failed';
+      await log(false, message);
+      // Falls through to the webhook so the report still arrives.
+    }
+  }
+
   if (webhook === undefined || webhook === '') {
     await log(false, 'SLACK_WEBHOOK_URL is not configured');
     throw new Error('Slack is not set up yet. Ask Aflah to add the webhook URL.');
@@ -607,6 +710,31 @@ export const postAreaReport = async (
         throw new Error(`Slack rejected the report (${response.status})`);
       }
     }
+
+    // Without a bot token the photos go as signed links, since image
+    // blocks would stack a dozen full-width images under the report.
+    if (report.photos.length > 0) {
+      const links: string[] = [];
+      for (const photo of report.photos) {
+        const { data } = await serviceClient()
+          .storage.from(BUCKET)
+          .createSignedUrl(photo.storageKey, SIGNED_URL_TTL_SECONDS);
+        if (data !== null) {
+          links.push(`<${data.signedUrl}|${photo.title}>`);
+        }
+      }
+
+      if (links.length > 0) {
+        await fetch(webhook, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: `*Evidence* (${links.length})\n${links.join('\n')}\n_Links expire in 7 days._`,
+          }),
+        });
+      }
+    }
+
     await log(true, null);
   } catch (cause: unknown) {
     const message = cause instanceof Error ? cause.message : 'Network error';
