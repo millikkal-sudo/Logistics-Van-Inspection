@@ -227,6 +227,7 @@ type SummaryRow = {
   id: string;
   performed_at: string;
   plate: string;
+  vehicle_type: 'van' | 'truck';
   area_name: string;
   area_id: string | null;
   driver_name: string;
@@ -269,6 +270,7 @@ export const listInspectionsSince = async (
     id: row.id,
     performedAt: row.performed_at,
     plate: row.plate,
+    vehicleType: row.vehicle_type ?? 'van',
     areaName: row.area_name,
     driverName: row.driver_name,
     driverId: row.driver_id,
