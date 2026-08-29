@@ -133,6 +133,7 @@ export type InspectionSummary = {
   driverName: string;
   inspectorName: string;
   helperName: string | null;
+  vehicleType: VehicleType;
   driverId: string;
   helperId: string | null;
   status: InspectionStatus;
