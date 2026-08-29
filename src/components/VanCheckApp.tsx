@@ -307,6 +307,7 @@ export const VanCheckApp = ({
           id: `${van.vanId}-${time}`,
           performedAt: new Date().toISOString(),
           plate: van.plate,
+          vehicleType: van.vehicleType,
           areaName: area?.name ?? 'Unassigned',
           driverName: van.driverName,
           helperName: van.helperName,
@@ -687,7 +688,7 @@ const VanList = ({
       <Header
         eyebrow={`${area.name} · ${profile.fullName}`}
         title="Which van?"
-        sub={`${due.length} van${due.length === 1 ? '' : 's'} in this area`}
+        sub={`${due.length} vehicle${due.length === 1 ? '' : 's'} in this area`}
         onBack={onBack}
       />
       <div className="space-y-3 p-4">
@@ -1442,7 +1443,7 @@ const Report = ({
         ) : (
           <div className="overflow-hidden rounded-xl border border-line bg-surface-card">
             <div className="border-b border-line px-4 py-3 text-[11px] font-bold uppercase tracking-wide text-content-secondary">
-              Vans checked
+              Vehicles checked
             </div>
             {records.map((record) => (
               <div
