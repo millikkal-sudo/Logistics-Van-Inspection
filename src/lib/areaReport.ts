@@ -319,65 +319,107 @@ const listObservations = async (
 };
 
 /**
- * The same vehicle failing the same check more than once in 30 days.
+ * A failure from today that has happened before on the same vehicle
+ * within 30 days.
  *
- * A single failure is an incident. The same one recurring is a pattern,
- * and a pattern is the thing worth acting on.
+ * Scoped to today's failures deliberately. Listing every vehicle with
+ * history meant the same names appeared every day regardless of whether
+ * anything went wrong that morning, which trained everyone to skip the
+ * section.
  */
 const listRepeats = async (records: InspectionSummary[]): Promise<Repeat[]> => {
-  const plates = new Set(records.map((record) => record.plate));
-  if (plates.size === 0) {
+  const failedToday = records.filter((record) => record.failedCount > 0);
+  if (failedToday.length === 0) {
     return [];
   }
 
-  const since = new Date();
-  since.setDate(since.getDate() - 30);
+  const db = serviceClient();
 
-  const history = await listInspectionsSince(since);
-  const relevant = history.filter(
-    (record) => plates.has(record.plate) && record.failedCount > 0,
-  );
-
-  if (relevant.length === 0) {
-    return [];
-  }
-
-  const { data } = await serviceClient()
+  // What failed today, per vehicle.
+  const { data: todayRows } = await db
     .from('inspection_results')
     .select('inspection_id, check_items(label)')
     .in(
       'inspection_id',
-      relevant.map((record) => record.id),
+      failedToday.map((record) => record.id),
     )
     .eq('passed', false);
 
-  type Row = { inspection_id: string; check_items: { label: string } | { label: string }[] | null };
+  type Row = {
+    inspection_id: string;
+    check_items: { label: string } | { label: string }[] | null;
+  };
 
-  const tally = new Map<string, Repeat>();
+  const labelOfRow = (relation: Row['check_items']): string =>
+    Array.isArray(relation) ? (relation[0]?.label ?? 'Check') : (relation?.label ?? 'Check');
 
-  for (const raw of (data ?? []) as unknown as Row[]) {
-    const relation = raw.check_items;
-    const label = Array.isArray(relation)
-      ? (relation[0]?.label ?? 'Check')
-      : (relation?.label ?? 'Check');
+  /** plate|check for each of today's failures. */
+  const todayKeys = new Map<string, { plate: string; driverName: string; checkLabel: string }>();
 
-    const record = relevant.find((candidate) => candidate.id === raw.inspection_id);
+  for (const raw of (todayRows ?? []) as unknown as Row[]) {
+    const record = failedToday.find((candidate) => candidate.id === raw.inspection_id);
     if (record === undefined) {
       continue;
     }
-
-    const key = `${record.plate}|${label}`;
-    const existing = tally.get(key);
-    tally.set(key, {
+    const label = labelOfRow(raw.check_items);
+    todayKeys.set(`${record.plate}|${label}`, {
       plate: record.plate,
       driverName: record.driverName,
       checkLabel: label,
-      count: (existing?.count ?? 0) + 1,
     });
   }
 
-  return [...tally.values()]
-    .filter((entry) => entry.count > 1)
+  if (todayKeys.size === 0) {
+    return [];
+  }
+
+  // The prior 30 days, excluding today's round.
+  const since = new Date();
+  since.setDate(since.getDate() - 30);
+
+  const history = await listInspectionsSince(since);
+  const todayIds = new Set(records.map((record) => record.id));
+  const priorFailures = history.filter(
+    (record) => !todayIds.has(record.id) && record.failedCount > 0,
+  );
+
+  if (priorFailures.length === 0) {
+    return [];
+  }
+
+  const { data: priorRows } = await db
+    .from('inspection_results')
+    .select('inspection_id, check_items(label)')
+    .in(
+      'inspection_id',
+      priorFailures.map((record) => record.id),
+    )
+    .eq('passed', false);
+
+  const priorCounts = new Map<string, number>();
+
+  for (const raw of (priorRows ?? []) as unknown as Row[]) {
+    const record = priorFailures.find((candidate) => candidate.id === raw.inspection_id);
+    if (record === undefined) {
+      continue;
+    }
+    const key = `${record.plate}|${labelOfRow(raw.check_items)}`;
+    // Only tracks the combinations that actually failed today. Anything
+    // else is history nobody asked about this morning.
+    if (todayKeys.has(key)) {
+      priorCounts.set(key, (priorCounts.get(key) ?? 0) + 1);
+    }
+  }
+
+  return [...todayKeys.entries()]
+    .flatMap(([key, entry]) => {
+      const before = priorCounts.get(key) ?? 0;
+      if (before === 0) {
+        return [];
+      }
+      // Today plus the earlier ones.
+      return [{ ...entry, count: before + 1 }];
+    })
     .sort((a, b) => b.count - a.count);
 };
 
