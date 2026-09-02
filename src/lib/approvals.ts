@@ -80,6 +80,72 @@ export const isApprover = async (profile: Profile): Promise<boolean> => {
   return data?.is_approver === true;
 };
 
+/**
+ * Tells the approver a change is waiting.
+ *
+ * Prefers a direct message: an approval request is for one person, and
+ * posting it to the operations channel makes everyone else scroll past
+ * it. Falls back to a webhook when no bot token is configured.
+ *
+ * Never throws. A notification that fails must not lose the change, so
+ * the failure is recorded and the proposal still stands.
+ */
+const notifyApprover = async (summary: string, actor: Profile): Promise<void> => {
+  const botToken = process.env.SLACK_BOT_TOKEN;
+  const approverId = process.env.SLACK_APPROVER_USER_ID;
+  const webhook = process.env.SLACK_APPROVAL_WEBHOOK_URL ?? process.env.SLACK_WEBHOOK_URL;
+  const origin = process.env.NEXT_PUBLIC_SITE_URL ?? '';
+
+  const text = [
+    ':pencil: *A fleet change is waiting for review*',
+    `*${summary}*`,
+    `Requested by ${actor.fullName} (${actor.email})`,
+    origin === '' ? '' : `<${origin}/admin|Open the Approvals tab>`,
+  ]
+    .filter((line) => line !== '')
+    .join('\n');
+
+  try {
+    if (botToken !== undefined && approverId !== undefined && approverId !== '') {
+      const response = await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${botToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: approverId, text }),
+      });
+      const body = (await response.json()) as { ok?: boolean; error?: string };
+      if (body.ok === true) {
+        return;
+      }
+      throw new Error(body.error ?? 'chat.postMessage failed');
+    }
+
+    if (webhook === undefined || webhook === '') {
+      throw new Error('No Slack destination configured for approvals');
+    }
+
+    const mention = process.env.SLACK_APPROVER_USER_ID;
+    await fetch(webhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: mention === undefined || mention === '' ? text : `<@${mention}> ${text}`,
+      }),
+    });
+  } catch (cause: unknown) {
+    // Logged, not thrown: the change is already saved, and losing it
+    // because Slack was unreachable would be the worse failure.
+    await serviceClient().from('alerts').insert({
+      inspection_id: null,
+      channel: 'slack',
+      recipient: 'approver',
+      sent_at: new Date().toISOString(),
+      delivered: false,
+      error: cause instanceof Error ? cause.message : 'Unknown error',
+      payload: { summary },
+    });
+  }
+};
+
 export const proposeChange = async (
   entity: string,
   operation: Operation,
@@ -114,6 +180,8 @@ export const proposeChange = async (
   if (error !== null) {
     throw new Error(`Could not send for review: ${error.message}`);
   }
+
+  await notifyApprover(summary, actor);
 
   return { summary };
 };
