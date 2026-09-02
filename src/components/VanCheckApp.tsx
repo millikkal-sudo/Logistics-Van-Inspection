@@ -422,6 +422,7 @@ export const VanCheckApp = ({
             today={today}
             area={area}
             slack={slack}
+            inspectorName={profile.fullName}
             shiftLabel={shiftLabel}
             tempMin={tempMin}
             tempMax={tempMax}
@@ -478,15 +479,30 @@ const Header = ({
   </header>
 );
 
+/**
+ * The report goes to the whole operations channel and becomes part of
+ * the record, so it asks for a declaration first.
+ *
+ * Two purposes: it stops an accidental send, and it puts the inspector's
+ * name behind the numbers. A report nobody has to stand behind is a
+ * report nobody reads carefully before sending.
+ */
 const SlackPanel = ({
   slack,
   areasVisited,
   shiftLabel,
+  inspectorName,
+  vehicleCount,
 }: {
   slack: SlackSend;
   areasVisited: string[];
   shiftLabel: string;
-}) => (
+  inspectorName: string;
+  vehicleCount: number;
+}) => {
+  const [declared, setDeclared] = useState(false);
+
+  return (
   <div className="rounded-xl border border-line bg-surface-card p-4">
     <div className="text-sm font-bold text-content">
       Send {shiftLabel.toLowerCase()} report to Slack
@@ -504,6 +520,30 @@ const SlackPanel = ({
       className="mt-3 w-full resize-none rounded-lg border border-line bg-surface-page p-3 text-sm text-content outline-none disabled:opacity-60"
     />
 
+    {!slack.sent && (
+      <button
+        type="button"
+        onClick={() => setDeclared(!declared)}
+        className="mt-3 flex w-full items-start gap-3 rounded-lg border border-line bg-surface-page p-3 text-left"
+      >
+        <span
+          className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 text-xs font-bold ${
+            declared
+              ? 'border-brand bg-brand-action text-content-invert'
+              : 'border-line bg-surface-card text-transparent'
+          }`}
+          aria-hidden="true"
+        >
+          ✓
+        </span>
+        <span className="text-xs leading-relaxed text-content-secondary">
+          I confirm that I, <span className="font-bold text-content">{inspectorName}</span>,
+          carried out {vehicleCount} inspection{vehicleCount === 1 ? '' : 's'} this shift, and
+          that the readings, causes and photographs recorded are accurate.
+        </span>
+      </button>
+    )}
+
     {slack.error !== null && (
       <div className="mt-2 rounded-lg bg-fail-soft p-3 text-sm font-medium text-fail">
         {slack.error}
@@ -513,10 +553,16 @@ const SlackPanel = ({
     <button
       type="button"
       onClick={slack.onSend}
-      disabled={slack.sending || slack.sent}
-      className="mt-3 w-full rounded-xl bg-brand-action py-3.5 text-sm font-bold text-content-invert disabled:bg-pass-soft disabled:text-pass"
+      disabled={slack.sending || slack.sent || !declared}
+      className="mt-3 w-full rounded-xl bg-brand-action py-3.5 text-sm font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
     >
-      {slack.sent ? 'Report sent' : slack.sending ? 'Sending…' : 'Send report to Slack'}
+      {slack.sent
+        ? 'Report sent'
+        : slack.sending
+          ? 'Sending…'
+          : declared
+            ? 'Send report to Slack'
+            : 'Confirm the declaration to send'}
     </button>
 
     {slack.sent && (
@@ -525,7 +571,8 @@ const SlackPanel = ({
       </p>
     )}
   </div>
-);
+  );
+};
 
 const Chip = ({ status }: { status: InspectionStatus }) => {
   const meta = STATUS_META[status];
@@ -600,6 +647,8 @@ const AreaList = ({
           slack={slack}
           areasVisited={[...new Set(today.map((record) => record.areaName))].sort()}
           shiftLabel={shiftLabel}
+          inspectorName={profile.fullName}
+          vehicleCount={today.length}
         />
       )}
 
@@ -1372,6 +1421,7 @@ const Report = ({
   today,
   area,
   slack,
+  inspectorName,
   shiftLabel,
   tempMin,
   tempMax,
@@ -1380,6 +1430,7 @@ const Report = ({
   today: InspectionSummary[];
   area: Area | null;
   slack: SlackSend;
+  inspectorName: string;
   shiftLabel: string;
   tempMin: number;
   tempMax: number;
@@ -1476,7 +1527,13 @@ const Report = ({
         )}
 
         {records.length > 0 && (
-          <SlackPanel slack={slack} areasVisited={areasVisited} shiftLabel={shiftLabel} />
+          <SlackPanel
+            slack={slack}
+            areasVisited={areasVisited}
+            shiftLabel={shiftLabel}
+            inspectorName={inspectorName}
+            vehicleCount={today.length}
+          />
         )}
 
         <button
