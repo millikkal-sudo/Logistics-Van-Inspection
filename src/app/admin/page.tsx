@@ -8,6 +8,7 @@ import {
   listVans,
 } from '@/lib/fleetRepository';
 import { listCheckItems } from '@/lib/inspectionRepository';
+import { isApprover, listPending } from '@/lib/approvals';
 import { currentProfile, ForbiddenError, UnauthorizedError } from '@/lib/session';
 
 const AdminPage = async () => {
@@ -20,13 +21,16 @@ const AdminPage = async () => {
 
     // Inactive records are included here — this is the only screen where
     // you can bring one back.
-    const [areas, vans, drivers, causes, actions, checkItems] = await Promise.all([
+    const [areas, vans, drivers, causes, actions, checkItems, pending, approver] =
+      await Promise.all([
       listAreas(true),
       listVans(true),
       listDrivers(true),
       listCauses(true),
       listActions(true),
       listCheckItems(),
+      listPending(),
+      isApprover(profile),
     ]);
 
     return (
@@ -37,6 +41,8 @@ const AdminPage = async () => {
         causes={causes}
         actions={actions}
         checkItems={checkItems}
+        pending={pending}
+        isApprover={approver}
         isAdmin={profile.role === 'admin'}
       />
     );
