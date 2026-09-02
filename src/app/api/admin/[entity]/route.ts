@@ -6,6 +6,7 @@ import {
   updateRecord,
   type Entity,
 } from '@/lib/adminRepository';
+import { isApprover, proposeChange } from '@/lib/approvals';
 import { ValidationError } from '@/lib/inspectionRepository';
 import { currentProfile, ForbiddenError, requireRole, UnauthorizedError } from '@/lib/session';
 
@@ -49,7 +50,21 @@ export const POST = async (request: Request, context: Context): Promise<NextResp
       throw new ValidationError('Expected a JSON object');
     }
 
-    const result = await createRecord(auth.entity, body as Record<string, unknown>, auth.profile);
+    const payload = body as Record<string, unknown>;
+
+    // Anyone but an approver proposes; only an approver applies.
+    if (!(await isApprover(auth.profile))) {
+      const { summary } = await proposeChange(
+        auth.entity,
+        'create',
+        null,
+        payload,
+        auth.profile,
+      );
+      return NextResponse.json({ queued: true, summary }, { status: 202 });
+    }
+
+    const result = await createRecord(auth.entity, payload, auth.profile);
     return NextResponse.json(result, { status: 201 });
   } catch (cause: unknown) {
     return errorResponse(cause);
@@ -74,8 +89,21 @@ export const PATCH = async (request: Request, context: Context): Promise<NextRes
     }
 
     // A bare { id, active } is a deactivation, not a full edit.
-    if (typeof payload.active === 'boolean' && Object.keys(payload).length === 2) {
-      await setActive(auth.entity, id, payload.active, auth.profile);
+    const isToggle = typeof payload.active === 'boolean' && Object.keys(payload).length === 2;
+
+    if (!(await isApprover(auth.profile))) {
+      const { summary } = await proposeChange(
+        auth.entity,
+        isToggle ? 'setActive' : 'update',
+        id,
+        payload,
+        auth.profile,
+      );
+      return NextResponse.json({ queued: true, summary }, { status: 202 });
+    }
+
+    if (isToggle) {
+      await setActive(auth.entity, id, payload.active === true, auth.profile);
       return NextResponse.json({ ok: true });
     }
 
@@ -94,6 +122,11 @@ export const DELETE = async (request: Request, context: Context): Promise<NextRe
     const id = new URL(request.url).searchParams.get('id');
     if (id === null || id === '') {
       throw new ValidationError('id is required');
+    }
+
+    if (!(await isApprover(auth.profile))) {
+      const { summary } = await proposeChange(auth.entity, 'delete', id, {}, auth.profile);
+      return NextResponse.json({ queued: true, summary }, { status: 202 });
     }
 
     const result = await deleteRecord(auth.entity, id, auth.profile);
