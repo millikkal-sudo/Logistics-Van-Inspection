@@ -368,6 +368,17 @@ const Reports = ({ areas }: { areas: Area[] }) => {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
 
+
+  /** Vaguer than the data, but readable. "vs previous" told nobody what. */
+  const periodLabel =
+    preset === 'today'
+      ? 'yesterday'
+      : preset === 'week' || preset === 'last7'
+        ? 'last week'
+        : preset === 'month' || preset === 'lastMonth'
+          ? 'last month'
+          : 'the period before';
+
   const params = (): string => {
     const search = new URLSearchParams({ from, to });
     if (areaId !== '') {
@@ -503,15 +514,25 @@ const Reports = ({ areas }: { areas: Area[] }) => {
             <Tile
               label="Vehicles checked"
               value={String(data.stats.vansCovered)}
-              caption={`${data.stats.checks} inspection${data.stats.checks === 1 ? '' : 's'}`}
-              delta={data.stats.vansCovered - data.previous.vansCovered}
-              tone="pass"
+              caption={`${data.stats.checks} check${data.stats.checks === 1 ? '' : 's'} on ${data.stats.vansCovered} vehicle${data.stats.vansCovered === 1 ? '' : 's'}`}
+              change={{
+                amount: data.stats.vansCovered - data.previous.vansCovered,
+                unit: 'vehicles',
+                riseIsGood: true,
+                period: periodLabel,
+              }}
+              tone="plain"
             />
             <Tile
               label="Compliance"
               value={`${data.stats.compliancePct}%`}
-              caption={`${data.stats.cleared} cleared of ${data.stats.checks} checked`}
-              delta={data.stats.compliancePct - data.previous.compliancePct}
+              caption={`${data.stats.cleared} of ${data.stats.checks} checks passed`}
+              change={{
+                amount: data.stats.compliancePct - data.previous.compliancePct,
+                unit: 'points',
+                riseIsGood: true,
+                period: periodLabel,
+              }}
               tone={
                 data.stats.compliancePct >= 90
                   ? 'pass'
@@ -523,16 +544,29 @@ const Reports = ({ areas }: { areas: Area[] }) => {
             <Tile
               label="Non-compliant"
               value={String(data.stats.nonCompliant)}
-              caption="failures to close out"
-              delta={data.previous.nonCompliant - data.stats.nonCompliant}
+              caption={`check${data.stats.nonCompliant === 1 ? '' : 's'} failed`}
+              change={{
+                amount: data.stats.nonCompliant - data.previous.nonCompliant,
+                unit: 'failures',
+                // Fewer failures is the good direction. Treating a rise
+                // as positive is what made the arrow read backwards.
+                riseIsGood: false,
+                period: periodLabel,
+              }}
               tone={data.stats.nonCompliant === 0 ? 'pass' : 'fail'}
             />
             <Tile
-              label="Highest temp"
+              label="Highest temperature"
               value={
                 data.stats.worstTempC === null ? '—' : `${data.stats.worstTempC.toFixed(1)}°C`
               }
-              caption="An average hides the one hot van"
+              caption={
+                data.stats.worstTempC === null
+                  ? 'no readings in this period'
+                  : data.stats.worstTempC > 5
+                    ? `${(data.stats.worstTempC - 5).toFixed(1)}°C above the 5°C limit`
+                    : 'within the 0 to 5°C limit'
+              }
               tone={
                 data.stats.worstTempC === null || data.stats.worstTempC <= 5 ? 'pass' : 'fail'
               }
@@ -739,50 +773,68 @@ const TONES = {
   pass: { text: 'text-pass', bg: 'bg-pass-soft' },
   hold: { text: 'text-hold', bg: 'bg-hold-soft' },
   fail: { text: 'text-fail', bg: 'bg-fail-soft' },
+  plain: { text: 'text-content', bg: 'bg-surface-card' },
 } as const;
 
 /**
- * A figure with no baseline is decoration. Every tile carries the same
- * figure for the preceding window of equal length.
+ * A figure with no baseline is decoration, so every tile carries the
+ * same figure for the previous period.
+ *
+ * The change is spelled out rather than shown as an arrow. An arrow
+ * alone cannot say whether a move was good: failures rising from 5 to 14
+ * was drawing a downward arrow, which read as an improvement.
  */
 const Tile = ({
   label,
   value,
   caption,
-  delta,
+  change,
   tone,
 }: {
   label: string;
   value: string;
   caption: string;
-  delta?: number;
+  change?: {
+    /** Signed. Positive means the figure went up, good or not. */
+    amount: number;
+    /** "points", "vehicles", "failures". */
+    unit: string;
+    /** Whether a rise is good news here. */
+    riseIsGood: boolean;
+    /** "last week", "yesterday". */
+    period: string;
+  };
   tone: keyof typeof TONES;
 }) => {
   const meta = TONES[tone];
-  const rounded = delta === undefined ? 0 : Math.round(delta);
+  const rounded = change === undefined ? 0 : Math.round(change.amount);
+  const better = change === undefined ? false : rounded > 0 === change.riseIsGood;
 
   return (
     <div className={`rounded-md border border-line p-4 ${meta.bg}`}>
       <div className="text-[11px] font-bold uppercase tracking-wide text-content-secondary">
         {label}
       </div>
-      <div className="mt-1 flex items-baseline gap-2">
-        <span className={`text-4xl font-black ${meta.text}`}>{value}</span>
-        {delta !== undefined && rounded !== 0 && (
-          <span
-            className={`text-xs font-bold ${rounded > 0 ? 'text-pass' : 'text-fail'}`}
-          >
-            {rounded > 0 ? '▲' : '▼'} {Math.abs(rounded)} vs previous
-          </span>
-        )}
-        {delta !== undefined && rounded === 0 && (
-          <span className="text-xs font-bold text-content-secondary">no change</span>
-        )}
-      </div>
+
+      <div className={`mt-1 text-4xl font-black ${meta.text}`}>{value}</div>
+
       <div className="mt-1 text-xs text-content-secondary">{caption}</div>
+
+      {change !== undefined && (
+        <div
+          className={`mt-2 text-xs font-bold ${
+            rounded === 0 ? 'text-content-secondary' : better ? 'text-pass' : 'text-fail'
+          }`}
+        >
+          {rounded === 0
+            ? `Same as ${change.period}`
+            : `${Math.abs(rounded)} ${change.unit} ${rounded > 0 ? 'more' : 'fewer'} than ${change.period}`}
+        </div>
+      )}
     </div>
   );
 };
+
 
 /* ------------------------------- shared ------------------------------- */
 
