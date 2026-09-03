@@ -367,7 +367,8 @@ const Reports = ({ areas }: { areas: Area[] }) => {
   const [data, setData] = useState<ReportPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
-
+  const [statusFilter, setStatusFilter] = useState<'all' | 'compliant' | 'noncompliant'>('all');
+  const [areaFilter, setAreaFilter] = useState('');
 
   /** Vaguer than the data, but readable. "vs previous" told nobody what. */
   const periodLabel =
@@ -497,16 +498,33 @@ const Reports = ({ areas }: { areas: Area[] }) => {
       {data !== null && (() => {
         // Filters the table only. The tiles keep reporting the whole
         // range, so a search cannot quietly change what the numbers mean.
-        const visible = data.records.filter((row) =>
-          matches(
+        // Historic records may carry the retired action_required
+        // status, so anything not compliant counts as non-compliant.
+        const visible = data.records.filter((row) => {
+          const failed = row.status !== 'compliant';
+          if (statusFilter === 'compliant' && failed) {
+            return false;
+          }
+          if (statusFilter === 'noncompliant' && !failed) {
+            return false;
+          }
+          if (areaFilter !== '' && row.areaName !== areaFilter) {
+            return false;
+          }
+          return matches(
             search,
             row.plate,
             row.driverName,
             row.helperName,
             row.areaName,
             row.inspectorName,
-          ),
-        );
+          );
+        });
+
+        const areasInRange: string[] = [
+          ...new Set<string>(data.records.map((row) => row.areaName)),
+        ].sort();
+        const failedCount = data.records.filter((row) => row.status !== 'compliant').length;
 
         return (
         <>
@@ -573,13 +591,58 @@ const Reports = ({ areas }: { areas: Area[] }) => {
             />
           </div>
 
-          <SearchBox
-            value={search}
-            onChange={setSearch}
-            placeholder="Search by plate, driver, helper, area or inspector"
-            count={visible.length}
-            total={data.records.length}
-          />
+          <div className="space-y-3">
+            <SearchBox
+              value={search}
+              onChange={setSearch}
+              placeholder="Search by plate, driver, helper, area or inspector"
+              count={visible.length}
+              total={data.records.length}
+            />
+
+            <div className="flex flex-wrap items-center gap-2">
+              <FilterChip
+                label="All"
+                count={data.records.length}
+                active={statusFilter === 'all'}
+                onClick={() => setStatusFilter('all')}
+              />
+              <FilterChip
+                label="Cleared"
+                count={data.records.length - failedCount}
+                active={statusFilter === 'compliant'}
+                tone="pass"
+                onClick={() => setStatusFilter('compliant')}
+              />
+              <FilterChip
+                label="Non-compliant"
+                count={failedCount}
+                active={statusFilter === 'noncompliant'}
+                tone="fail"
+                onClick={() => setStatusFilter('noncompliant')}
+              />
+
+              {areasInRange.length > 1 && (
+                <>
+                  <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
+                  <FilterChip
+                    label="All areas"
+                    active={areaFilter === ''}
+                    onClick={() => setAreaFilter('')}
+                  />
+                  {areasInRange.map((name) => (
+                    <FilterChip
+                      key={name}
+                      label={name}
+                      count={data.records.filter((row) => row.areaName === name).length}
+                      active={areaFilter === name}
+                      onClick={() => setAreaFilter(name)}
+                    />
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
 
           <div className="overflow-x-auto rounded-md border border-line bg-surface-card">
             <table className="w-full text-left text-sm">
@@ -604,7 +667,7 @@ const Reports = ({ areas }: { areas: Area[] }) => {
               <p className="p-8 text-center text-sm text-content-secondary">
                 {data.records.length === 0
                   ? 'No checks in that range.'
-                  : `Nothing matches "${search}" in this range. The tiles above still cover the whole range.`}
+                  : 'Nothing matches the current filters. The tiles above still cover the whole range.'}
               </p>
             )}
           </div>
@@ -961,6 +1024,50 @@ const ApprovalsTab = ({
         </div>
       ))}
     </div>
+  );
+};
+
+/**
+ * Filters the table only, the same as the search box. The tiles keep
+ * reporting the whole range, so narrowing the list cannot quietly change
+ * what the percentages mean.
+ */
+const FilterChip = ({
+  label,
+  count,
+  active,
+  tone = 'plain',
+  onClick,
+}: {
+  label: string;
+  count?: number;
+  active: boolean;
+  tone?: 'plain' | 'pass' | 'fail';
+  onClick: () => void;
+}) => {
+  const activeStyle =
+    tone === 'pass'
+      ? 'bg-pass text-content-invert'
+      : tone === 'fail'
+        ? 'bg-fail text-content-invert'
+        : 'bg-brand-action text-content-invert';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-full px-3.5 py-1.5 text-xs font-bold ${
+        active ? activeStyle : 'border border-line bg-surface-card text-content-secondary'
+      }`}
+    >
+      {label}
+      {count !== undefined && (
+        <span className={active ? 'ml-1.5 opacity-80' : 'ml-1.5 text-content-tertiary'}>
+          {count}
+        </span>
+      )}
+    </button>
   );
 };
 
