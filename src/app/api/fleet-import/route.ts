@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { importFleet, previewFleet } from '@/lib/bulkImport';
-import { isApprover, proposeChange } from '@/lib/approvals';
 import { fetchSheetCsv, SheetError } from '@/lib/googleSheet';
 import { ValidationError } from '@/lib/inspectionRepository';
 import { currentProfile, ForbiddenError, requireRole, UnauthorizedError } from '@/lib/session';
@@ -40,12 +39,6 @@ export const POST = async (request: Request): Promise<NextResponse> => {
       return NextResponse.json(preview);
     }
 
-    if (!(isApprover(profile))) {
-      // The raw rows are queued, not the preview: the import is
-      // re-validated on approval so anything added since is caught.
-      const { summary } = await proposeChange('fleet', 'bulkImport', null, { text }, profile);
-      return NextResponse.json({ ...preview, queued: true, summary }, { status: 202 });
-    }
 
     const imported = await importFleet(preview.valid, profile);
     return NextResponse.json({ ...preview, imported });
