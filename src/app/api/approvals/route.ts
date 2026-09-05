@@ -32,7 +32,7 @@ export const POST = async (request: Request): Promise<NextResponse> => {
     const profile = await currentProfile();
     requireRole(profile, ['manager', 'admin']);
 
-    if (!(await isApprover(profile))) {
+    if (!(isApprover(profile))) {
       throw new ForbiddenError('Only an approver can review changes');
     }
 
