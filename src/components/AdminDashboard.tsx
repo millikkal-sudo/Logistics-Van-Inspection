@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BulkImport } from './BulkImport';
-import type { PendingChange } from '@/lib/approvals';
 import { CaloMark } from './CaloMark';
 import { PlateScanner, type PlateReading } from './PlateScanner';
 import type {
@@ -16,7 +15,7 @@ import type {
   Van,
 } from '@/lib/types';
 
-type Tab = 'reports' | 'training' | 'areas' | 'vans' | 'drivers' | 'options' | 'approvals';
+type Tab = 'reports' | 'training' | 'areas' | 'vans' | 'drivers' | 'options';
 
 type ReportRow = {
   id: string;
@@ -71,8 +70,6 @@ type Props = {
   causes: CheckCause[];
   actions: CheckAction[];
   checkItems: CheckItem[];
-  pending: PendingChange[];
-  isApprover: boolean;
   isAdmin: boolean;
 };
 
@@ -83,8 +80,6 @@ export const AdminDashboard = ({
   causes,
   actions,
   checkItems,
-  pending,
-  isApprover,
   isAdmin,
 }: Props) => {
   const router = useRouter();
@@ -126,11 +121,7 @@ export const AdminDashboard = ({
       const payload: unknown = await response.json().catch(() => null);
       if (typeof payload === 'object' && payload !== null) {
         const record = payload as Record<string, unknown>;
-        if (record.queued === true) {
-          setNotice(
-            `Sent for review: ${String(record.summary ?? 'your change')}. It takes effect once approved.`,
-          );
-        } else if (typeof record.note === 'string') {
+        if (typeof record.note === 'string') {
           setNotice(record.note);
         }
       }
@@ -174,17 +165,7 @@ export const AdminDashboard = ({
         )}
 
         <nav className="mt-4 flex gap-1 overflow-x-auto">
-          {(
-            [
-              'reports',
-              'training',
-              'areas',
-              'vans',
-              'drivers',
-              'options',
-              ...(isApprover ? (['approvals'] as Tab[]) : []),
-            ] as Tab[]
-          ).map((key) => (
+          {(['reports', 'training', 'areas', 'vans', 'drivers', 'options'] as Tab[]).map((key) => (
             <button
               key={key}
               type="button"
@@ -194,11 +175,6 @@ export const AdminDashboard = ({
               }`}
             >
               {key}
-              {key === 'approvals' && pending.length > 0 && (
-                <span className="ml-1.5 rounded-full bg-fail px-1.5 py-0.5 text-[10px] text-content-invert">
-                  {pending.length}
-                </span>
-              )}
             </button>
           ))}
         </nav>
@@ -235,7 +211,6 @@ export const AdminDashboard = ({
 
         {tab === 'reports' && <Reports areas={areas} />}
 
-        {tab === 'approvals' && <ApprovalsTab pending={pending} busy={busy} onCall={call} />}
 
         {tab === 'training' && <TrainingTab areas={areas} />}
 
@@ -935,156 +910,6 @@ const Field = ({
  * fleet is loaded, and scrolling to find one plate is the slow part of
  * every edit.
  */
-/**
- * The review queue.
- *
- * Only an approver sees this tab. Everyone else's edits land here rather
- * than being applied, so a wrong plate or a deleted driver is caught
- * before it reaches the people doing checks at 06:30.
- */
-const ApprovalsTab = ({
-  pending,
-  busy,
-  onCall,
-}: {
-  pending: PendingChange[];
-  busy: boolean;
-  onCall: CallFn;
-}) => {
-  const [open, setOpen] = useState<string | null>(null);
-
-  if (pending.length === 0) {
-    return (
-      <div className="rounded-md border border-line bg-surface-card p-8 text-center">
-        <p className="text-sm font-bold text-content">Nothing waiting for review</p>
-        <p className="mt-1 text-xs text-content-secondary">
-          Edits made by anyone other than an approver appear here.
-        </p>
-      </div>
-    );
-  }
-
-  const review = (id: string, decision: 'approved' | 'rejected'): void => {
-    void onCall('/api/approvals', 'POST', { id, decision });
-  };
-
-  return (
-    <div className="space-y-3">
-      {pending.map((change) => (
-        <div key={change.id} className="rounded-md border border-line bg-surface-card p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-sm font-bold text-content">{change.summary}</div>
-              <div className="mt-0.5 text-xs text-content-secondary">
-                {change.requestedByName} · {change.requestedByEmail} ·{' '}
-                {new Date(change.requestedAt).toLocaleString('en-GB', {
-                  day: '2-digit',
-                  month: 'short',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </div>
-            </div>
-
-            <div className="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setOpen(open === change.id ? null : change.id)}
-                className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-content-secondary"
-              >
-                {open === change.id ? 'Hide' : 'Detail'}
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => review(change.id, 'rejected')}
-                className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-fail"
-              >
-                Reject
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => review(change.id, 'approved')}
-                className="rounded-lg bg-pass px-4 py-1.5 text-xs font-bold text-content-invert"
-              >
-                Approve
-              </button>
-            </div>
-          </div>
-
-          {open === change.id && (
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              {change.before !== null && (
-                <div className="rounded-sm border border-line bg-surface-page p-3">
-                  <div className="text-[11px] font-bold uppercase tracking-wide text-content-secondary">
-                    Now
-                  </div>
-                  <pre className="mt-1 overflow-x-auto whitespace-pre-wrap font-mono text-[11px] text-content-secondary">
-                    {JSON.stringify(change.before, null, 2)}
-                  </pre>
-                </div>
-              )}
-              <div className="rounded-sm border border-line bg-surface-page p-3">
-                <div className="text-[11px] font-bold uppercase tracking-wide text-brand">
-                  Proposed
-                </div>
-                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap font-mono text-[11px] text-content">
-                  {JSON.stringify(change.payload, null, 2)}
-                </pre>
-              </div>
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-};
-
-/**
- * Filters the table only, the same as the search box. The tiles keep
- * reporting the whole range, so narrowing the list cannot quietly change
- * what the percentages mean.
- */
-const FilterChip = ({
-  label,
-  count,
-  active,
-  tone = 'plain',
-  onClick,
-}: {
-  label: string;
-  count?: number;
-  active: boolean;
-  tone?: 'plain' | 'pass' | 'fail';
-  onClick: () => void;
-}) => {
-  const activeStyle =
-    tone === 'pass'
-      ? 'bg-pass text-content-invert'
-      : tone === 'fail'
-        ? 'bg-fail text-content-invert'
-        : 'bg-brand-action text-content-invert';
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`rounded-full px-3.5 py-1.5 text-xs font-bold ${
-        active ? activeStyle : 'border border-line bg-surface-card text-content-secondary'
-      }`}
-    >
-      {label}
-      {count !== undefined && (
-        <span className={active ? 'ml-1.5 opacity-80' : 'ml-1.5 text-content-tertiary'}>
-          {count}
-        </span>
-      )}
-    </button>
-  );
-};
-
 const SearchBox = ({
   value,
   onChange,
