@@ -6,7 +6,6 @@ import {
   updateRecord,
   type Entity,
 } from '@/lib/adminRepository';
-import { isApprover, proposeChange } from '@/lib/approvals';
 import { ValidationError } from '@/lib/inspectionRepository';
 import { currentProfile, ForbiddenError, requireRole, UnauthorizedError } from '@/lib/session';
 
@@ -52,17 +51,6 @@ export const POST = async (request: Request, context: Context): Promise<NextResp
 
     const payload = body as Record<string, unknown>;
 
-    // Anyone but an approver proposes; only an approver applies.
-    if (!(isApprover(auth.profile))) {
-      const { summary } = await proposeChange(
-        auth.entity,
-        'create',
-        null,
-        payload,
-        auth.profile,
-      );
-      return NextResponse.json({ queued: true, summary }, { status: 202 });
-    }
 
     const result = await createRecord(auth.entity, payload, auth.profile);
     return NextResponse.json(result, { status: 201 });
@@ -91,16 +79,6 @@ export const PATCH = async (request: Request, context: Context): Promise<NextRes
     // A bare { id, active } is a deactivation, not a full edit.
     const isToggle = typeof payload.active === 'boolean' && Object.keys(payload).length === 2;
 
-    if (!(isApprover(auth.profile))) {
-      const { summary } = await proposeChange(
-        auth.entity,
-        isToggle ? 'setActive' : 'update',
-        id,
-        payload,
-        auth.profile,
-      );
-      return NextResponse.json({ queued: true, summary }, { status: 202 });
-    }
 
     if (isToggle) {
       await setActive(auth.entity, id, payload.active === true, auth.profile);
@@ -124,10 +102,6 @@ export const DELETE = async (request: Request, context: Context): Promise<NextRe
       throw new ValidationError('id is required');
     }
 
-    if (!(isApprover(auth.profile))) {
-      const { summary } = await proposeChange(auth.entity, 'delete', id, {}, auth.profile);
-      return NextResponse.json({ queued: true, summary }, { status: 202 });
-    }
 
     const result = await deleteRecord(auth.entity, id, auth.profile);
     return NextResponse.json({ ok: true, note: result.note });
