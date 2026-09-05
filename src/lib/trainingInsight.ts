@@ -22,6 +22,10 @@ export type DefectCount = {
 
 export type QueueEntry = {
   personId: string;
+  /** Area of the person's van, so the queue can be cleared area by area. */
+  areaName: string;
+  /** When they were last trained, if ever. */
+  lastTrainedAt: string | null;
   personName: string;
   role: 'driver' | 'helper';
   /** Failures on checks whose cause a session could fix. */
@@ -43,6 +47,28 @@ export type SystemicIssue = {
   peopleAffected: number;
   count: number;
   reason: string;
+};
+
+/**
+ * When each person was last trained.
+ *
+ * Failures before that date are excluded from the queue: the session
+ * addressed them. Anything after it counts, so someone who slips again
+ * reappears without anyone having to remember.
+ */
+const lastTrainedByPerson = async (): Promise<Map<string, string>> => {
+  const { data } = await serviceClient()
+    .from('training_sessions')
+    .select('person_id, completed_at')
+    .order('completed_at', { ascending: false });
+
+  const out = new Map<string, string>();
+  for (const row of (data ?? []) as { person_id: string; completed_at: string }[]) {
+    if (!out.has(row.person_id)) {
+      out.set(row.person_id, row.completed_at);
+    }
+  }
+  return out;
 };
 
 export type TrainingInsight = {
@@ -69,10 +95,13 @@ export const getTrainingInsight = async (
   to: Date,
   areaId?: string,
 ): Promise<TrainingInsight> => {
-  const records = await listInspectionsSince(from, {
-    until: to,
-    ...(areaId === undefined ? {} : { areaId }),
-  });
+  const [records, lastTrained] = await Promise.all([
+    listInspectionsSince(from, {
+      until: to,
+      ...(areaId === undefined ? {} : { areaId }),
+    }),
+    lastTrainedByPerson(),
+  ]);
 
   const failing = records.filter((record) => record.failedCount > 0);
   if (failing.length === 0) {
@@ -130,14 +159,22 @@ export const getTrainingInsight = async (
     }
 
     for (const person of attributed) {
-      const entry = people.get(person.id) ?? {
+      // Cleared by a session: anything they were trained on is closed.
+      const trainedAt = lastTrained.get(person.id);
+      if (trainedAt !== undefined && record.performedAt <= trainedAt) {
+        continue;
+      }
+
+      const entry: QueueEntry = people.get(person.id) ?? {
         personId: person.id,
         personName: person.name,
+        areaName: record.areaName,
+        lastTrainedAt: trainedAt ?? null,
         role: person.role,
         trainableCount: 0,
         nonTrainableCount: 0,
         flaggedCount: 0,
-        causes: [],
+        causes: [] as string[],
         lastSeen: record.performedAt,
         priority: 'watch' as const,
         reason: '',
@@ -174,6 +211,10 @@ export const getTrainingInsight = async (
     ].filter((id): id is string => id !== null);
 
     for (const id of ids) {
+      const trainedAt = lastTrained.get(id);
+      if (trainedAt !== undefined && record.performedAt <= trainedAt) {
+        continue;
+      }
       const entry = people.get(id);
       if (entry !== undefined) {
         entry.flaggedCount += 1;
