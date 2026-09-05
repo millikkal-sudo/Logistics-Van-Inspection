@@ -281,6 +281,8 @@ type Stats = {
 type DefectCount = { checkLabel: string; causeLabel: string; category: string; count: number };
 type QueueEntry = {
   personId: string;
+  areaName: string;
+  lastTrainedAt: string | null;
   personName: string;
   role: 'driver' | 'helper';
   trainableCount: number;
@@ -1219,6 +1221,61 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
   const [areaId, setAreaId] = useState('');
   const [insight, setInsight] = useState<Insight | null>(null);
   const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [topic, setTopic] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+
+  const toggle = (personId: string): void => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(personId)) {
+        next.delete(personId);
+      } else {
+        next.add(personId);
+      }
+      return next;
+    });
+  };
+
+  /**
+   * Records the session and drops those people from the queue. Dated
+   * rather than dismissed, so anyone who fails again after today comes
+   * back on their own.
+   */
+  const recordTraining = async (personIds: string[]): Promise<void> => {
+    if (personIds.length === 0) {
+      return;
+    }
+    setSaving(true);
+    setDone(null);
+    try {
+      const response = await fetch('/api/training', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ personIds, topic }),
+      });
+      if (!response.ok) {
+        const body: unknown = await response.json();
+        setDone(
+          typeof body === 'object' && body !== null && 'error' in body
+            ? String((body as { error: unknown }).error)
+            : 'Could not record the training',
+        );
+        return;
+      }
+      setDone(
+        `Training recorded for ${personIds.length} ${personIds.length === 1 ? 'person' : 'people'}.`,
+      );
+      setSelected(new Set());
+      setTopic('');
+      await load();
+    } catch {
+      setDone('Could not reach the server');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -1306,12 +1363,73 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
         </div>
       )}
 
+      {done !== null && (
+        <div className="rounded-md bg-pass-soft p-3 text-sm font-medium text-pass">{done}</div>
+      )}
+
       <div className="overflow-hidden rounded-md border border-line bg-surface-card">
         <div className="border-b border-line px-4 py-3">
           <div className="text-sm font-bold text-content">Training queue</div>
           <p className="mt-0.5 text-xs text-content-secondary">
-            Only failures a session could actually change.
+            Only failures a session could actually change. Recording training clears the person
+            from here, and anyone who fails again afterwards returns on their own.
           </p>
+
+          {insight !== null && insight.queue.length > 0 && (
+            <div className="mt-3 space-y-2">
+              <input
+                value={topic}
+                onChange={(event) => setTopic(event.target.value)}
+                placeholder="What was covered? (optional)"
+                className="w-full rounded-sm border border-line bg-surface-page px-3 py-2 text-sm text-content outline-none"
+              />
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={saving || selected.size === 0}
+                  onClick={() => void recordTraining([...selected])}
+                  className="rounded-sm bg-pass px-4 py-2 text-xs font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
+                >
+                  {saving
+                    ? 'Recording…'
+                    : selected.size === 0
+                      ? 'Select people to record training'
+                      : `Record training for ${selected.size}`}
+                </button>
+
+                {/* A group briefing covers an area at once. Ticking
+                    fifteen rows afterwards is the friction that stops
+                    anyone logging it. */}
+                {[...new Set(insight.queue.map((entry) => entry.areaName))].sort().map((name) => {
+                  const ids = insight.queue
+                    .filter((entry) => entry.areaName === name)
+                    .map((entry) => entry.personId);
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      disabled={saving}
+                      onClick={() => void recordTraining(ids)}
+                      className="rounded-sm border border-line px-3 py-2 text-xs font-bold text-brand"
+                    >
+                      Clear {name} ({ids.length})
+                    </button>
+                  );
+                })}
+
+                {selected.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelected(new Set())}
+                    className="text-xs font-bold text-content-secondary"
+                  >
+                    Clear selection
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {insight === null || insight.queue.length === 0 ? (
@@ -1320,10 +1438,24 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
           </p>
         ) : (
           insight.queue.map((entry) => (
-            <div
+            <button
               key={entry.personId}
-              className="flex items-start gap-3 border-b border-line px-4 py-3 last:border-b-0"
+              type="button"
+              onClick={() => toggle(entry.personId)}
+              className={`flex w-full items-start gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 ${
+                selected.has(entry.personId) ? 'bg-pass-soft' : ''
+              }`}
             >
+              <span
+                className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 text-xs font-bold ${
+                  selected.has(entry.personId)
+                    ? 'border-pass bg-pass text-content-invert'
+                    : 'border-line bg-surface-card text-transparent'
+                }`}
+                aria-hidden="true"
+              >
+                ✓
+              </span>
               <span
                 className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${
                   entry.priority === 'session' ? 'bg-fail-soft text-fail' : 'bg-hold-soft text-hold'
@@ -1338,12 +1470,22 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
                 </div>
                 <div className="mt-0.5 text-xs text-content-secondary">{entry.reason}</div>
                 <div className="mt-1 text-xs text-content-secondary">
-                  {entry.causes.join(', ')}
+                  {entry.areaName} · {entry.causes.join(', ')}
                   {entry.nonTrainableCount > 0 &&
                     ` · ${entry.nonTrainableCount} supply or equipment failure${entry.nonTrainableCount === 1 ? '' : 's'} excluded`}
                 </div>
+                {entry.lastTrainedAt !== null && (
+                  <div className="mt-1 text-xs text-content-tertiary">
+                    Last trained{' '}
+                    {new Date(entry.lastTrainedAt).toLocaleDateString('en-GB', {
+                      day: 'numeric',
+                      month: 'short',
+                    })}
+                    , and has failed since
+                  </div>
+                )}
               </div>
-            </div>
+            </button>
           ))
         )}
       </div>
