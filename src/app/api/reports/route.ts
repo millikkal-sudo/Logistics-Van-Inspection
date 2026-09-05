@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { dubaiDayRange } from '@/lib/shift';
 import { getReportStats, listInspectionsSince } from '@/lib/inspectionRepository';
-import { getTrainingInsight } from '@/lib/trainingInsight';
 import { currentProfile, ForbiddenError, requireRole, UnauthorizedError } from '@/lib/session';
 
 /**
@@ -106,13 +105,16 @@ export const GET = async (request: Request): Promise<NextResponse> => {
     const previousTo = new Date(from.getTime() - 1);
     const previousFrom = new Date(previousTo.getTime() - spanMs);
 
-    const [stats, previous, insight] = await Promise.all([
-      getReportStats(from, to, areaId),
+    // The records are already in hand, so the stats reuse them rather
+    // than scanning the table again. The training insight has moved to
+    // its own endpoint: computing it here made every filter change on
+    // the Reports tab pay for a tab nobody was looking at.
+    const [stats, previous] = await Promise.all([
+      getReportStats(from, to, areaId, records),
       getReportStats(previousFrom, previousTo, areaId),
-      getTrainingInsight(from, to, areaId),
     ]);
 
-    return NextResponse.json({ records, stats, previous, insight });
+    return NextResponse.json({ records, stats, previous });
   } catch (cause: unknown) {
     if (cause instanceof UnauthorizedError) {
       return NextResponse.json({ error: cause.message }, { status: 401 });
