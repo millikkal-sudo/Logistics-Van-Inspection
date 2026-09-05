@@ -20,7 +20,6 @@ type ProfileRow = {
   role: UserRole;
   depot: string;
   active: boolean;
-  is_approver: boolean;
 };
 
 export const currentProfile = async (): Promise<Profile> => {
@@ -34,7 +33,7 @@ export const currentProfile = async (): Promise<Profile> => {
 
   const { data, error } = await client
     .from('profiles')
-    .select('id, email, full_name, role, depot, active, is_approver')
+    .select('id, email, full_name, role, depot, active')
     .eq('id', user.id)
     .single<ProfileRow>();
 
@@ -51,9 +50,6 @@ export const currentProfile = async (): Promise<Profile> => {
     fullName: data.full_name,
     role: data.role,
     depot: data.depot,
-    // Carried on the profile so an admin write does not query the
-    // profiles table twice for the same person.
-    isApprover: data.is_approver === true,
   };
 };
 
