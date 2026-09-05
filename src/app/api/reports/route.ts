@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { dubaiDayRange } from '@/lib/shift';
 import { getReportStats, listInspectionsSince } from '@/lib/inspectionRepository';
 import { getTrainingInsight } from '@/lib/trainingInsight';
 import { currentProfile, ForbiddenError, requireRole, UnauthorizedError } from '@/lib/session';
@@ -22,14 +23,17 @@ const csvCell = (value: string | number | null): string => {
   return `"${safe.replace(/"/g, '""')}"`;
 };
 
+/** Days are interpreted in Dubai, not in the server's timezone. */
 const parseRange = (
   fromParam: string | null,
   toParam: string | null,
 ): { from: Date; to: Date } => {
-  const from = fromParam === null ? new Date(Date.now() - 7 * 86_400_000) : new Date(fromParam);
-  const to = toParam === null ? new Date() : new Date(`${toParam}T23:59:59.999`);
-  from.setHours(0, 0, 0, 0);
-  return { from, to };
+  const today = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const weekAgo = new Date(Date.now() + 4 * 60 * 60 * 1000 - 7 * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+
+  return dubaiDayRange(fromParam ?? weekAgo, toParam ?? today);
 };
 
 export const GET = async (request: Request): Promise<NextResponse> => {
