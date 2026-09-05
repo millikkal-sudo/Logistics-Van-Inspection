@@ -143,7 +143,7 @@ const drawStats = (cursor: Cursor, fonts: Fonts, stats: ReportStats): void => {
 
   const tiles: { label: string; value: string; note: string }[] = [
     {
-      label: 'Vans checked',
+      label: 'Vehicles checked',
       value: String(stats.vansCovered),
       note: `${stats.checks} inspection${stats.checks === 1 ? '' : 's'}`,
     },

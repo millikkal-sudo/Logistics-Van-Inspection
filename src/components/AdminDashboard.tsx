@@ -910,6 +910,50 @@ const Field = ({
  * fleet is loaded, and scrolling to find one plate is the slow part of
  * every edit.
  */
+/**
+ * Filters the table only, the same as the search box. The tiles keep
+ * reporting the whole range, so narrowing the list cannot quietly change
+ * what the percentages mean.
+ */
+const FilterChip = ({
+  label,
+  count,
+  active,
+  tone = 'plain',
+  onClick,
+}: {
+  label: string;
+  count?: number;
+  active: boolean;
+  tone?: 'plain' | 'pass' | 'fail';
+  onClick: () => void;
+}) => {
+  const activeStyle =
+    tone === 'pass'
+      ? 'bg-pass text-content-invert'
+      : tone === 'fail'
+        ? 'bg-fail text-content-invert'
+        : 'bg-brand-action text-content-invert';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-full px-3.5 py-1.5 text-xs font-bold ${
+        active ? activeStyle : 'border border-line bg-surface-card text-content-secondary'
+      }`}
+    >
+      {label}
+      {count !== undefined && (
+        <span className={active ? 'ml-1.5 opacity-80' : 'ml-1.5 text-content-tertiary'}>
+          {count}
+        </span>
+      )}
+    </button>
+  );
+};
+
 const SearchBox = ({
   value,
   onChange,
