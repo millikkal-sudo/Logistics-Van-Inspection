@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { buildInspectionPdf } from '@/lib/inspectionPdf';
+import { dubaiDayRange } from '@/lib/shift';
 import { getReportStats, listInspectionsSince } from '@/lib/inspectionRepository';
 import { listAreas } from '@/lib/fleetRepository';
 import { currentProfile, ForbiddenError, requireRole, UnauthorizedError } from '@/lib/session';
@@ -25,9 +26,13 @@ export const GET = async (request: Request): Promise<NextResponse> => {
     const fromParam = searchParams.get('from');
     const toParam = searchParams.get('to');
 
-    const from = fromParam === null ? new Date(Date.now() - 7 * 86_400_000) : new Date(fromParam);
-    const to = toParam === null ? new Date() : new Date(`${toParam}T23:59:59.999`);
-    from.setHours(0, 0, 0, 0);
+    // Same Dubai-day handling as the JSON report, so the PDF and the
+    // dashboard cannot disagree about what a date range covers.
+    const today = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const weekAgo = new Date(Date.now() + 4 * 60 * 60 * 1000 - 7 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const { from, to } = dubaiDayRange(fromParam ?? weekAgo, toParam ?? today);
 
     if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
       return NextResponse.json({ error: 'Invalid date range' }, { status: 422 });
