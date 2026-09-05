@@ -15,8 +15,6 @@ export type Profile = {
   fullName: string;
   role: UserRole;
   depot: string;
-  /** Read once with the profile rather than queried again per write. */
-  isApprover: boolean;
 };
 
 export type Area = {
