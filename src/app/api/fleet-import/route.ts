@@ -40,7 +40,7 @@ export const POST = async (request: Request): Promise<NextResponse> => {
       return NextResponse.json(preview);
     }
 
-    if (!(await isApprover(profile))) {
+    if (!(isApprover(profile))) {
       // The raw rows are queued, not the preview: the import is
       // re-validated on approval so anything added since is caught.
       const { summary } = await proposeChange('fleet', 'bulkImport', null, { text }, profile);
