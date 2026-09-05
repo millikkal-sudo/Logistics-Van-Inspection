@@ -114,3 +114,38 @@ export const shiftDateLabel = (shift: Shift): string =>
 export const previousShift = (shift: Shift): Shift =>
   resolveShift(new Date(shift.from.getTime() - 60 * 1000));
 
+/**
+ * The date a shift started, in Dubai, as YYYY-MM-DD.
+ *
+ * An early morning shift runs 19:00 to 02:00, so a van marked at 23:00
+ * and the same van at 01:00 belong to one shift. Keying on the calendar
+ * date of the moment would split them across two.
+ */
+export const shiftDateKey = (shift: Shift): string => {
+  const started = new Date(shift.from.getTime() + DUBAI_OFFSET_MS);
+  return started.toISOString().slice(0, 10);
+};
+
+/**
+ * Turns two YYYY-MM-DD strings into the instants that bound those days
+ * in Dubai.
+ *
+ * `new Date('2026-08-31')` is UTC midnight, which is 04:00 in Dubai. A
+ * range built that way silently dropped the first four hours of the
+ * opening day and pulled in four hours of the day after the closing one,
+ * so a report labelled "this week" included checks from outside it.
+ */
+export const dubaiDayRange = (fromDay: string, toDay: string): { from: Date; to: Date } => {
+  const parse = (value: string): [number, number, number] => {
+    const [year, month, day] = value.split('-').map(Number);
+    return [year ?? 1970, (month ?? 1) - 1, day ?? 1];
+  };
+
+  const [fy, fm, fd] = parse(fromDay);
+  const [ty, tm, td] = parse(toDay);
+
+  return {
+    from: new Date(Date.UTC(fy, fm, fd, 0, 0, 0, 0) - DUBAI_OFFSET_MS),
+    to: new Date(Date.UTC(ty, tm, td, 23, 59, 59, 999) - DUBAI_OFFSET_MS),
+  };
+};
