@@ -93,6 +93,15 @@ export const AdminDashboard = ({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  /**
+   * Every admin write goes through here.
+   *
+   * router.refresh re-runs the server page, which is what makes the new
+   * data appear. It is also the slow part, so the button is disabled and
+   * labelled for the whole round trip rather than only until the fetch
+   * resolves: a control that looks ready while the list is still stale
+   * invites a second click.
+   */
   const call = async (path: string, method: string, body: unknown): Promise<boolean> => {
     setBusy(true);
     setError(null);
@@ -159,6 +168,10 @@ export const AdminDashboard = ({
             Back to checks
           </a>
         </div>
+
+        {busy && (
+          <div className="mt-3 text-xs font-bold text-content-invert-secondary">Saving…</div>
+        )}
 
         <nav className="mt-4 flex gap-1 overflow-x-auto">
           {(
@@ -305,7 +318,6 @@ type ReportPayload = {
   records: ReportRow[];
   stats: Stats;
   previous: Stats;
-  insight: Insight;
 };
 
 type PresetKey = 'today' | 'week' | 'last7' | 'month' | 'lastMonth' | 'custom';
@@ -1280,19 +1292,15 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
   const load = useCallback(async (): Promise<void> => {
     setLoading(true);
     try {
-      const to = new Date();
-      const from = new Date(Date.now() - days * 86_400_000);
-      const search = new URLSearchParams({
-        from: from.toISOString().slice(0, 10),
-        to: to.toISOString().slice(0, 10),
-      });
+      const search = new URLSearchParams({ days: String(days) });
       if (areaId !== '') {
         search.set('areaId', areaId);
       }
-      const response = await fetch(`/api/reports?${search.toString()}`);
+      // Its own endpoint now: the reports call no longer computes this,
+      // so a filter change on the Reports tab is much cheaper.
+      const response = await fetch(`/api/training?${search.toString()}`);
       if (response.ok) {
-        const payload = (await response.json()) as ReportPayload;
-        setInsight(payload.insight);
+        setInsight((await response.json()) as Insight);
       }
     } finally {
       setLoading(false);
