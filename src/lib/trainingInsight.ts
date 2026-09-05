@@ -1,6 +1,6 @@
 import { serviceClient } from './supabaseClients';
 import { listInspectionsSince } from './inspectionRepository';
-import type { CauseCategory } from './types';
+import type { CauseCategory, InspectionSummary } from './types';
 
 /**
  * Turns inspection failures into a training decision.
@@ -94,12 +94,15 @@ export const getTrainingInsight = async (
   from: Date,
   to: Date,
   areaId?: string,
+  /** Reused when the caller already fetched them. */
+  known?: InspectionSummary[],
 ): Promise<TrainingInsight> => {
   const [records, lastTrained] = await Promise.all([
-    listInspectionsSince(from, {
-      until: to,
-      ...(areaId === undefined ? {} : { areaId }),
-    }),
+    known ??
+      listInspectionsSince(from, {
+        until: to,
+        ...(areaId === undefined ? {} : { areaId }),
+      }),
     lastTrainedByPerson(),
   ]);
 

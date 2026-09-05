@@ -444,13 +444,20 @@ export const getReportStats = async (
   from: Date,
   to: Date,
   areaId?: string,
+  /**
+   * Pass the records if the caller already has them. Without this a
+   * single report request scanned the inspections table four times: once
+   * for the table, once for the stats, once for the comparison, once for
+   * the training insight.
+   */
+  known?: InspectionSummary[],
 ): Promise<ReportStats> => {
-  const db = serviceClient();
-
-  const records = await listInspectionsSince(from, {
-    until: to,
-    ...(areaId === undefined ? {} : { areaId }),
-  });
+  const records =
+    known ??
+    (await listInspectionsSince(from, {
+      until: to,
+      ...(areaId === undefined ? {} : { areaId }),
+    }));
 
   const cleared = records.filter((record) => record.status === 'compliant').length;
   // Historic records may carry the retired action_required status. They

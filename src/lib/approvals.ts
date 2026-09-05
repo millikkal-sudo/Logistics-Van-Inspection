@@ -70,15 +70,8 @@ const describe = (
   return `Edit ${noun}: ${name}`;
 };
 
-export const isApprover = async (profile: Profile): Promise<boolean> => {
-  const { data } = await serviceClient()
-    .from('profiles')
-    .select('is_approver')
-    .eq('id', profile.id)
-    .maybeSingle<{ is_approver: boolean }>();
-
-  return data?.is_approver === true;
-};
+/** Already on the profile, so this costs nothing. */
+export const isApprover = (profile: Profile): boolean => profile.isApprover;
 
 /**
  * Tells the approver a change is waiting.
