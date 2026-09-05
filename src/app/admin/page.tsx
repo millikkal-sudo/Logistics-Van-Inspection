@@ -21,8 +21,7 @@ const AdminPage = async () => {
 
     // Inactive records are included here — this is the only screen where
     // you can bring one back.
-    const [areas, vans, drivers, causes, actions, checkItems, pending, approver] =
-      await Promise.all([
+    const [areas, vans, drivers, causes, actions, checkItems, pending] = await Promise.all([
       listAreas(true),
       listVans(true),
       listDrivers(true),
@@ -30,7 +29,6 @@ const AdminPage = async () => {
       listActions(true),
       listCheckItems(),
       listPending(),
-      isApprover(profile),
     ]);
 
     return (
@@ -42,7 +40,7 @@ const AdminPage = async () => {
         actions={actions}
         checkItems={checkItems}
         pending={pending}
-        isApprover={approver}
+        isApprover={isApprover(profile)}
         isAdmin={profile.role === 'admin'}
       />
     );
