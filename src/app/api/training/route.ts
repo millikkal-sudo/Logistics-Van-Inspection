@@ -1,7 +1,48 @@
 import { NextResponse } from 'next/server';
 import { serviceClient } from '@/lib/supabaseClients';
 import { ValidationError } from '@/lib/inspectionRepository';
+import { getTrainingInsight } from '@/lib/trainingInsight';
+import { dubaiDayRange } from '@/lib/shift';
 import { currentProfile, ForbiddenError, requireRole, UnauthorizedError } from '@/lib/session';
+
+/**
+ * The training queue.
+ *
+ * Split out of the reports endpoint so a filter change on the Reports
+ * tab no longer computes a queue nobody is looking at.
+ */
+export const GET = async (request: Request): Promise<NextResponse> => {
+  try {
+    const profile = await currentProfile();
+    requireRole(profile, ['manager', 'admin']);
+
+    const { searchParams } = new URL(request.url);
+    const areaParam = searchParams.get('areaId');
+    const days = Number(searchParams.get('days') ?? '30');
+
+    const dubaiToday = new Date(Date.now() + 4 * 60 * 60 * 1000);
+    const to = dubaiToday.toISOString().slice(0, 10);
+    const from = new Date(dubaiToday.getTime() - days * 86_400_000).toISOString().slice(0, 10);
+    const range = dubaiDayRange(from, to);
+
+    return NextResponse.json(
+      await getTrainingInsight(
+        range.from,
+        range.to,
+        areaParam === null || areaParam === '' ? undefined : areaParam,
+      ),
+    );
+  } catch (cause: unknown) {
+    if (cause instanceof UnauthorizedError) {
+      return NextResponse.json({ error: cause.message }, { status: 401 });
+    }
+    if (cause instanceof ForbiddenError) {
+      return NextResponse.json({ error: cause.message }, { status: 403 });
+    }
+    const message = cause instanceof Error ? cause.message : 'Unexpected error';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+};
 
 /**
  * Records that training was delivered.
