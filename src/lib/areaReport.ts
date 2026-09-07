@@ -702,6 +702,8 @@ export const postAreaReport = async (
   areaId: string | null,
 ): Promise<void> => {
   const webhook = process.env.SLACK_WEBHOOK_URL;
+  const botToken = process.env.SLACK_BOT_TOKEN;
+  const channelId = process.env.SLACK_CHANNEL_ID;
   const channel = process.env.SLACK_ALERT_CHANNEL ?? '#uae-fleet-ops';
   const db = serviceClient();
 
@@ -709,7 +711,7 @@ export const postAreaReport = async (
     await db.from('alerts').insert({
       inspection_id: null,
       channel: 'slack',
-      recipient: channel,
+      recipient: channelId ?? channel,
       sent_at: new Date().toISOString(),
       delivered,
       error,
@@ -717,25 +719,48 @@ export const postAreaReport = async (
     });
   };
 
-  const botToken = process.env.SLACK_BOT_TOKEN;
-  const channelId = process.env.SLACK_CHANNEL_ID;
-
-  // Preferred: the report and its photos as one grouped post.
-  if (botToken !== undefined && channelId !== undefined && report.photos.length > 0) {
+  /**
+   * With a bot token configured, the bot sends everything.
+   *
+   * Previously the webhook handled reports without photos and the bot
+   * handled the rest, so the same report arrived under two different
+   * names and icons depending on whether anything had failed. One sender
+   * means one identity to configure and one to recognise.
+   */
+  if (botToken !== undefined && botToken !== '' && channelId !== undefined && channelId !== '') {
     try {
-      await uploadPhotoGroup(botToken, channelId, report.photos, report.text);
+      if (report.photos.length > 0) {
+        // The text rides along as the upload's comment, so the report
+        // and its evidence are a single post rather than two.
+        await uploadPhotoGroup(botToken, channelId, report.photos, report.text);
+      } else {
+        const response = await fetch('https://slack.com/api/chat.postMessage', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${botToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channel: channelId, text: report.text }),
+        });
+
+        const body = (await response.json()) as { ok?: boolean; error?: string };
+        if (body.ok !== true) {
+          throw new Error(body.error ?? 'chat.postMessage failed');
+        }
+      }
+
       await log(true, null);
       return;
     } catch (cause: unknown) {
-      const message = cause instanceof Error ? cause.message : 'Slack upload failed';
+      const message = cause instanceof Error ? cause.message : 'Slack send failed';
       await log(false, message);
-      // Falls through to the webhook so the report still arrives.
+      throw new Error(
+        `Slack rejected the report: ${message}. Check the bot is in the channel and has files:write and chat:write.`,
+      );
     }
   }
 
+  // No bot token: the webhook still works, with photos as links.
   if (webhook === undefined || webhook === '') {
-    await log(false, 'SLACK_WEBHOOK_URL is not configured');
-    throw new Error('Slack is not set up yet. Ask Aflah to add the webhook URL.');
+    await log(false, 'No Slack destination configured');
+    throw new Error('Slack is not set up yet. Ask Aflah to add the bot token or webhook.');
   }
 
   try {
@@ -753,8 +778,6 @@ export const postAreaReport = async (
       }
     }
 
-    // Without a bot token the photos go as signed links, since image
-    // blocks would stack a dozen full-width images under the report.
     if (report.photos.length > 0) {
       const links: string[] = [];
       for (const photo of report.photos) {
