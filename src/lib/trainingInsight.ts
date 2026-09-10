@@ -71,9 +71,36 @@ const lastTrainedByPerson = async (): Promise<Map<string, string>> => {
   return out;
 };
 
+/**
+ * A session someone would actually run: one check, the people who have
+ * failed it, and the causes behind those failures.
+ *
+ * The queue is a list of people, which is the wrong shape for the job.
+ * Nobody runs a session for "Shanam, 4 times, Other". They run one on
+ * grooming, for six people, in Dubai.
+ */
+export type TrainingTopic = {
+  checkLabel: string;
+  /** The causes seen, so the brief writes itself. */
+  causes: string[];
+  /** "Dubai 4, Sharjah 2". */
+  areaCounts: { areaName: string; count: number }[];
+  people: {
+    personId: string;
+    personName: string;
+    role: 'driver' | 'helper';
+    areaName: string;
+    count: number;
+  }[];
+};
+
 export type TrainingInsight = {
   defects: DefectCount[];
   queue: QueueEntry[];
+  /** Grouped for running a session. */
+  topics: TrainingTopic[];
+  /** People with a single failure and no pattern yet. */
+  watch: QueueEntry[];
   systemic: SystemicIssue[];
 };
 
@@ -108,7 +135,7 @@ export const getTrainingInsight = async (
 
   const failing = records.filter((record) => record.failedCount > 0);
   if (failing.length === 0) {
-    return { defects: [], queue: [], systemic: [] };
+    return { defects: [], queue: [], topics: [], watch: [], systemic: [] };
   }
 
   const { data } = await serviceClient()
@@ -275,6 +302,80 @@ export const getTrainingInsight = async (
 
   // The check that makes the cause field worth capturing: many people,
   // one non-trainable cause, is a supply or maintenance job.
+  /**
+   * Only trainable failures, and only people the queue still lists, so a
+   * session cleared yesterday does not reappear as a topic today.
+   */
+  const queuedIds = new Set(
+    queue.filter((entry) => entry.priority === 'session').map((entry) => entry.personId),
+  );
+  const topicMap = new Map<
+    string,
+    {
+      causes: Set<string>;
+      people: Map<string, TrainingTopic['people'][number]>;
+    }
+  >();
+
+  for (const row of rows) {
+    const checkLabel = firstOf(row.check_items)?.label ?? 'Unknown check';
+    const cause = firstOf(row.check_causes);
+    const category = cause?.category ?? 'other';
+
+    if (!TRAINABLE.includes(category)) {
+      continue;
+    }
+
+    const record = records.find((candidate) => candidate.id === row.inspection_id);
+    if (record === undefined) {
+      continue;
+    }
+
+    const isHelper =
+      record.trainingFlag === 'helper' && record.helperId !== null && record.helperName !== null;
+    const personId = isHelper ? record.helperId : record.driverId;
+    const personName = isHelper ? record.helperName : record.driverName;
+
+    if (personId === null || personName === null || !queuedIds.has(personId)) {
+      continue;
+    }
+
+    const topic = topicMap.get(checkLabel) ?? { causes: new Set<string>(), people: new Map() };
+    if (cause?.label !== undefined && cause.label.toLowerCase() !== 'other') {
+      topic.causes.add(cause.label);
+    }
+
+    const existing = topic.people.get(personId);
+    topic.people.set(personId, {
+      personId,
+      personName,
+      role: isHelper ? 'helper' : 'driver',
+      areaName: record.areaName,
+      count: (existing?.count ?? 0) + 1,
+    });
+
+    topicMap.set(checkLabel, topic);
+  }
+
+  const topics: TrainingTopic[] = [...topicMap.entries()]
+    .map(([checkLabel, topic]) => {
+      const people = [...topic.people.values()].sort((a, b) => b.count - a.count);
+      const byArea = new Map<string, number>();
+      for (const person of people) {
+        byArea.set(person.areaName, (byArea.get(person.areaName) ?? 0) + 1);
+      }
+
+      return {
+        checkLabel,
+        causes: [...topic.causes],
+        areaCounts: [...byArea.entries()]
+          .map(([areaName, count]) => ({ areaName, count }))
+          .sort((a, b) => b.count - a.count),
+        people,
+      };
+    })
+    .sort((a, b) => b.people.length - a.people.length);
+
   const systemic: SystemicIssue[] = [...defects.values()]
     .flatMap((defect) => {
       const affected = causeToPeople.get(`${defect.checkLabel}|${defect.causeLabel}`)?.size ?? 0;
@@ -302,6 +403,10 @@ export const getTrainingInsight = async (
   return {
     defects: [...defects.values()].sort((a, b) => b.count - a.count),
     queue,
+    // Topics carry anyone worth briefing; the watch list is the rest, so
+    // the two together account for the whole queue with no overlap.
+    topics,
+    watch: queue.filter((entry) => entry.priority === 'watch'),
     systemic,
   };
 };
