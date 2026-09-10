@@ -283,11 +283,31 @@ type QueueEntry = {
 type SystemicIssue = {
   checkLabel: string;
   causeLabel: string;
+  category: string;
   peopleAffected: number;
   count: number;
   reason: string;
 };
-type Insight = { defects: DefectCount[]; queue: QueueEntry[]; systemic: SystemicIssue[] };
+type Topic = {
+  checkLabel: string;
+  causes: string[];
+  areaCounts: { areaName: string; count: number }[];
+  people: {
+    personId: string;
+    personName: string;
+    role: 'driver' | 'helper';
+    areaName: string;
+    count: number;
+  }[];
+};
+
+type Insight = {
+  topics: Topic[];
+  watch: QueueEntry[];
+  defects: DefectCount[];
+  queue: QueueEntry[];
+  systemic: SystemicIssue[];
+};
 
 type ReportPayload = {
   records: ReportRow[];
@@ -1102,29 +1122,17 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
   const [areaId, setAreaId] = useState('');
   const [insight, setInsight] = useState<Insight | null>(null);
   const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [topic, setTopic] = useState('');
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState<string | null>(null);
+  const [showWatch, setShowWatch] = useState(false);
 
-  const toggle = (personId: string): void => {
-    setSelected((current) => {
-      const next = new Set(current);
-      if (next.has(personId)) {
-        next.delete(personId);
-      } else {
-        next.add(personId);
-      }
-      return next;
-    });
-  };
 
   /**
    * Records the session and drops those people from the queue. Dated
    * rather than dismissed, so anyone who fails again after today comes
    * back on their own.
    */
-  const recordTraining = async (personIds: string[]): Promise<void> => {
+  const recordTraining = async (personIds: string[], subject?: string): Promise<void> => {
     if (personIds.length === 0) {
       return;
     }
@@ -1134,7 +1142,8 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
       const response = await fetch('/api/training', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ personIds, topic }),
+        // The check name is the topic, so nobody has to type it.
+        body: JSON.stringify({ personIds, topic: subject }),
       });
       if (!response.ok) {
         const body: unknown = await response.json();
@@ -1148,8 +1157,6 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
       setDone(
         `Training recorded for ${personIds.length} ${personIds.length === 1 ? 'person' : 'people'}.`,
       );
-      setSelected(new Set());
-      setTopic('');
       await load();
     } catch {
       setDone('Could not reach the server');
@@ -1244,172 +1251,203 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
         <div className="rounded-md bg-pass-soft p-3 text-sm font-medium text-pass">{done}</div>
       )}
 
+      {done !== null && (
+        <div className="rounded-md bg-pass-soft p-3 text-sm font-medium text-pass">{done}</div>
+      )}
+
+      {/* Grouped by what you would brief them on. A list of people is
+          the wrong shape: nobody runs a session for one person and a
+          cause code. */}
       <div className="overflow-hidden rounded-md border border-line bg-surface-card">
         <div className="border-b border-line px-4 py-3">
-          <div className="text-sm font-bold text-content">Training queue</div>
+          <div className="text-sm font-bold text-content">Sessions to run</div>
           <p className="mt-0.5 text-xs text-content-secondary">
-            Only failures a session could actually change. Recording training clears the person
-            from here, and anyone who fails again afterwards returns on their own.
+            Grouped by what you would actually brief them on. Recording a session clears those
+            people, and anyone who fails again afterwards returns on their own.
           </p>
+        </div>
 
-          {insight !== null && insight.queue.length > 0 && (
-            <div className="mt-3 space-y-2">
-              <input
-                value={topic}
-                onChange={(event) => setTopic(event.target.value)}
-                placeholder="What was covered? (optional)"
-                className="w-full rounded-sm border border-line bg-surface-page px-3 py-2 text-sm text-content outline-none"
-              />
+        {insight === null || insight.topics.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-content-secondary">
+            {loading ? 'Loading…' : 'Nothing worth running a session on in this period.'}
+          </p>
+        ) : (
+          insight.topics.map((topic) => (
+            <TopicPanel
+              key={topic.checkLabel}
+              topic={topic}
+              saving={saving}
+              onRecord={(ids) => void recordTraining(ids, topic.checkLabel)}
+            />
+          ))
+        )}
+      </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  disabled={saving || selected.size === 0}
-                  onClick={() => void recordTraining([...selected])}
-                  className="rounded-sm bg-pass px-4 py-2 text-xs font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
-                >
-                  {saving
-                    ? 'Recording…'
-                    : selected.size === 0
-                      ? 'Select people to record training'
-                      : `Record training for ${selected.size}`}
-                </button>
+      {insight !== null && insight.systemic.length > 0 && (
+        <div className="overflow-hidden rounded-md border border-line bg-surface-card">
+          <div className="border-b border-line px-4 py-3">
+            <div className="text-sm font-bold text-content">Not a training problem</div>
+            <p className="mt-0.5 text-xs text-content-secondary">
+              Send these to the right person instead. A session would change nothing.
+            </p>
+          </div>
 
-                {/* A group briefing covers an area at once. Ticking
-                    fifteen rows afterwards is the friction that stops
-                    anyone logging it. */}
-                {[...new Set(insight.queue.map((entry) => entry.areaName))].sort().map((name) => {
-                  const ids = insight.queue
-                    .filter((entry) => entry.areaName === name)
-                    .map((entry) => entry.personId);
-                  return (
-                    <button
-                      key={name}
-                      type="button"
-                      disabled={saving}
-                      onClick={() => void recordTraining(ids)}
-                      className="rounded-sm border border-line px-3 py-2 text-xs font-bold text-brand"
-                    >
-                      Clear {name} ({ids.length})
-                    </button>
-                  );
-                })}
+          {insight.systemic.map((issue) => (
+            <div
+              key={`${issue.checkLabel}-${issue.causeLabel}`}
+              className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0"
+            >
+              <span className="rounded bg-hold-soft px-2 py-0.5 text-[11px] font-bold text-hold">
+                {issue.category === 'supply' ? 'Stores' : issue.category === 'equipment' ? 'Workshop' : 'Replace'}
+              </span>
+              <span className="text-sm text-content">{issue.causeLabel}</span>
+              <span className="ml-auto text-xs text-content-secondary">
+                {issue.peopleAffected} {issue.peopleAffected === 1 ? 'person' : 'people'} ·{' '}
+                {issue.count} time{issue.count === 1 ? '' : 's'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
-                {selected.size > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setSelected(new Set())}
-                    className="text-xs font-bold text-content-secondary"
-                  >
-                    Clear selection
-                  </button>
-                )}
-              </div>
+      {insight !== null && insight.watch.length > 0 && (
+        <div className="rounded-md bg-surface-card p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-bold text-content">Watch list</div>
+              <p className="mt-0.5 text-xs text-content-secondary">
+                {insight.watch.length} {insight.watch.length === 1 ? 'person' : 'people'} with one
+                failure and no pattern yet
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowWatch(!showWatch)}
+              className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-brand"
+            >
+              {showWatch ? 'Hide' : 'Show'}
+            </button>
+          </div>
+
+          {showWatch && (
+            <div className="mt-3 space-y-2 border-t border-line pt-3">
+              {insight.watch.map((entry) => (
+                <div key={entry.personId} className="flex items-center gap-3 text-xs">
+                  <span className="font-bold text-content">{entry.personName}</span>
+                  <span className="text-content-secondary">
+                    {entry.role} · {entry.areaName}
+                  </span>
+                  <span className="ml-auto text-content-secondary">
+                    {entry.causes.length === 0 ? 'No cause recorded' : entry.causes.join(', ')}
+                  </span>
+                </div>
+              ))}
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+};
 
-        {insight === null || insight.queue.length === 0 ? (
-          <p className="p-8 text-center text-sm text-content-secondary">
-            Nobody needs a session in this window.
-          </p>
-        ) : (
-          insight.queue.map((entry) => (
+/**
+ * One session: the check, the causes behind it, and who to include.
+ *
+ * Everyone is selected by default. The common case is briefing the whole
+ * group, so the work is deselecting the odd exception rather than
+ * ticking fifteen boxes.
+ */
+const TopicPanel = ({
+  topic,
+  saving,
+  onRecord,
+}: {
+  topic: Topic;
+  saving: boolean;
+  onRecord: (personIds: string[]) => void;
+}) => {
+  const [excluded, setExcluded] = useState<Set<string>>(new Set());
+  const included = topic.people.filter((person) => !excluded.has(person.personId));
+
+  const toggle = (id: string): void => {
+    setExcluded((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div className="border-b border-line px-4 py-3 last:border-b-0">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-bold text-content">{topic.checkLabel}</div>
+          <div className="mt-0.5 text-xs text-content-secondary">
+            {topic.people.length} {topic.people.length === 1 ? 'person' : 'people'} ·{' '}
+            {topic.areaCounts.map((area) => `${area.areaName} ${area.count}`).join(', ')}
+          </div>
+          {topic.causes.length > 0 && (
+            <div className="mt-0.5 text-xs text-content-tertiary">{topic.causes.join(', ')}</div>
+          )}
+        </div>
+
+        <button
+          type="button"
+          disabled={saving || included.length === 0}
+          onClick={() => onRecord(included.map((person) => person.personId))}
+          className="shrink-0 rounded-sm bg-pass px-4 py-2 text-xs font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
+        >
+          {saving
+            ? 'Recording…'
+            : included.length === 0
+              ? 'Nobody selected'
+              : `Record session for ${included.length}`}
+        </button>
+      </div>
+
+      <div className="mt-3 space-y-1.5 border-t border-line pt-3">
+        {topic.people.map((person) => {
+          const on = !excluded.has(person.personId);
+          return (
             <button
-              key={entry.personId}
+              key={person.personId}
               type="button"
-              onClick={() => toggle(entry.personId)}
-              className={`flex w-full items-start gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 ${
-                selected.has(entry.personId) ? 'bg-pass-soft' : ''
-              }`}
+              onClick={() => toggle(person.personId)}
+              className="flex w-full items-center gap-2.5 text-left text-xs"
             >
               <span
-                className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 text-xs font-bold ${
-                  selected.has(entry.personId)
-                    ? 'border-pass bg-pass text-content-invert'
-                    : 'border-line bg-surface-card text-transparent'
+                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 text-[10px] font-bold ${
+                  on ? 'border-pass bg-pass text-content-invert' : 'border-line text-transparent'
                 }`}
                 aria-hidden="true"
               >
                 ✓
               </span>
+              <span className={on ? 'font-bold text-content' : 'text-content-secondary'}>
+                {person.personName}
+              </span>
+              <span className="text-content-secondary">
+                {person.role} · {person.areaName}
+              </span>
               <span
-                className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${
-                  entry.priority === 'session' ? 'bg-fail-soft text-fail' : 'bg-hold-soft text-hold'
+                className={`ml-auto rounded px-2 py-0.5 text-[11px] font-bold ${
+                  person.count > 1 ? 'bg-fail-soft text-fail' : 'text-content-secondary'
                 }`}
               >
-                {entry.priority === 'session' ? 'Session' : 'Watch'}
+                {person.count === 1 ? 'once' : `${person.count} times`}
               </span>
-              <div className="min-w-0">
-                <div className="text-sm font-bold text-content">
-                  {entry.personName}{' '}
-                  <span className="text-xs font-normal text-content-secondary">{entry.role}</span>
-                </div>
-                <div className="mt-0.5 text-xs text-content-secondary">{entry.reason}</div>
-                {/* The area gets its own label rather than being run
-                    together with the causes: it is what the per-area
-                    clear buttons act on, so it needs to be obvious. */}
-                <div className="mt-1 flex flex-wrap items-center gap-2">
-                  <span className="rounded bg-surface-page px-2 py-0.5 text-[11px] font-bold text-content-secondary">
-                    {entry.areaName}
-                  </span>
-                  <span className="text-xs text-content-secondary">
-                    {entry.causes.length === 0 ? 'No specific cause recorded' : entry.causes.join(', ')}
-                  </span>
-                </div>
-                {entry.nonTrainableCount > 0 && (
-                  <div className="mt-1 text-xs text-content-tertiary">
-                    {entry.nonTrainableCount} supply or equipment failure
-                    {entry.nonTrainableCount === 1 ? '' : 's'} not counted here
-                  </div>
-                )}
-                {entry.lastTrainedAt !== null && (
-                  <div className="mt-1 text-xs text-content-tertiary">
-                    Last trained{' '}
-                    {new Date(entry.lastTrainedAt).toLocaleDateString('en-GB', {
-                      day: 'numeric',
-                      month: 'short',
-                    })}
-                    , and has failed since
-                  </div>
-                )}
-              </div>
             </button>
-          ))
-        )}
-      </div>
-
-      <div className="overflow-hidden rounded-md border border-line bg-surface-card">
-        <div className="border-b border-line px-4 py-3 text-sm font-bold text-content">
-          Defects by cause
-        </div>
-        {insight === null || insight.defects.length === 0 ? (
-          <p className="p-8 text-center text-sm text-content-secondary">No failures recorded.</p>
-        ) : (
-          insight.defects.map((defect) => (
-            <div
-              key={`${defect.checkLabel}-${defect.causeLabel}`}
-              className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5 last:border-b-0"
-            >
-              <div className="min-w-0 text-sm">
-                <span className="font-bold text-content">{defect.causeLabel}</span>{' '}
-                <span className="text-xs text-content-secondary">{defect.checkLabel}</span>
-              </div>
-              <div className="flex shrink-0 items-center gap-3">
-                <span className="rounded-full bg-surface-page px-2.5 py-1 text-[11px] font-bold text-content-secondary">
-                  {CATEGORY_LABELS[defect.category] ?? defect.category}
-                </span>
-                <span className="w-6 text-right text-sm font-bold text-content">
-                  {defect.count}
-                </span>
-              </div>
-            </div>
-          ))
-        )}
+          );
+        })}
       </div>
     </div>
   );
 };
+
 
 /* ------------------------------- causes ------------------------------- */
 
