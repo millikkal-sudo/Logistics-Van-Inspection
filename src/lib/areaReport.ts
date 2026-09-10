@@ -266,6 +266,8 @@ type Observation = {
   causeLabel: string | null;
   actionLabel: string | null;
   numericValue: number | null;
+  /** What the inspector typed against this specific check. */
+  note: string | null;
 };
 
 type Repeat = { plate: string; driverName: string; checkLabel: string; count: number };
@@ -287,7 +289,7 @@ const listObservations = async (
   const { data } = await serviceClient()
     .from('inspection_results')
     .select(
-      'inspection_id, numeric_value, check_items(code, label), check_causes(label), check_actions(label)',
+      'inspection_id, numeric_value, note, check_items(code, label), check_causes(label), check_actions(label)',
     )
     .in('inspection_id', ids)
     .eq('passed', false);
@@ -295,6 +297,7 @@ const listObservations = async (
   type Row = {
     inspection_id: string;
     numeric_value: number | null;
+    note: string | null;
     check_items: { code: string; label: string } | { code: string; label: string }[] | null;
     check_causes: { label: string } | { label: string }[] | null;
     check_actions: { label: string } | { label: string }[] | null;
@@ -311,6 +314,7 @@ const listObservations = async (
       causeLabel: first(raw.check_causes)?.label ?? null,
       actionLabel: first(raw.check_actions)?.label ?? null,
       numericValue: raw.numeric_value === null ? null : Number(raw.numeric_value),
+      note: raw.note === null || raw.note.trim() === '' ? null : raw.note.trim(),
     };
     out.set(raw.inspection_id, [...(out.get(raw.inspection_id) ?? []), entry]);
   }
@@ -569,10 +573,19 @@ export const buildAreaReport = async (
           if (item.numericValue !== null && item.checkCode === 'temp') {
             parts[0] = `${item.checkLabel} ${item.numericValue.toFixed(1)} °C`;
           }
-          const line = parts.join(', ');
-          return item.actionLabel === null ? line : `${line}. ${item.actionLabel}`;
+
+          let line = parts.join(', ');
+          if (item.actionLabel !== null) {
+            line = `${line}. ${item.actionLabel}`;
+          }
+          // The note the inspector wrote against this check, which was
+          // being recorded and then never shown to anyone.
+          if (item.note !== null) {
+            line = `${line}. _${item.note}_`;
+          }
+          return line;
         })
-        .join('. ');
+        .join(' ');
 
       const note =
         record.notes === null || record.notes === '' ? '' : ` _${record.notes}_`;
@@ -587,6 +600,31 @@ export const buildAreaReport = async (
       lines.push(
         `• *${repeat.plate} (${repeat.driverName})*: ${repeat.checkLabel} failed ${repeat.count} times in the last 30 days`,
       );
+    }
+  }
+
+  // The inspector's own call, made at the vehicle. This shift's flags
+  // only, not the standing queue: the queue is the dashboard's job, and
+  // repeating it here would put the same names in the channel daily.
+  const flagged = records.filter((record) => record.trainingFlag !== 'none');
+
+  if (flagged.length > 0) {
+    lines.push('', '*Marked for Training*');
+    for (const record of flagged) {
+      const who =
+        record.trainingFlag === 'both'
+          ? `${record.driverName} and ${record.helperName ?? 'helper'}`
+          : record.trainingFlag === 'helper'
+            ? (record.helperName ?? 'helper')
+            : record.driverName;
+      const role =
+        record.trainingFlag === 'both'
+          ? 'driver and helper'
+          : record.trainingFlag === 'helper'
+            ? 'helper'
+            : 'driver';
+
+      lines.push(`• *${who}* (${role}) – ${record.plate}`);
     }
   }
 
