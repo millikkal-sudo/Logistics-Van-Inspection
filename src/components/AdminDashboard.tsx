@@ -1346,11 +1346,23 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
                   <span className="text-xs font-normal text-content-secondary">{entry.role}</span>
                 </div>
                 <div className="mt-0.5 text-xs text-content-secondary">{entry.reason}</div>
-                <div className="mt-1 text-xs text-content-secondary">
-                  {entry.areaName} · {entry.causes.join(', ')}
-                  {entry.nonTrainableCount > 0 &&
-                    ` · ${entry.nonTrainableCount} supply or equipment failure${entry.nonTrainableCount === 1 ? '' : 's'} excluded`}
+                {/* The area gets its own label rather than being run
+                    together with the causes: it is what the per-area
+                    clear buttons act on, so it needs to be obvious. */}
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <span className="rounded bg-surface-page px-2 py-0.5 text-[11px] font-bold text-content-secondary">
+                    {entry.areaName}
+                  </span>
+                  <span className="text-xs text-content-secondary">
+                    {entry.causes.length === 0 ? 'No specific cause recorded' : entry.causes.join(', ')}
+                  </span>
                 </div>
+                {entry.nonTrainableCount > 0 && (
+                  <div className="mt-1 text-xs text-content-tertiary">
+                    {entry.nonTrainableCount} supply or equipment failure
+                    {entry.nonTrainableCount === 1 ? '' : 's'} not counted here
+                  </div>
+                )}
                 {entry.lastTrainedAt !== null && (
                   <div className="mt-1 text-xs text-content-tertiary">
                     Last trained{' '}
