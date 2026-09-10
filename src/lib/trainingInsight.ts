@@ -218,10 +218,33 @@ export const getTrainingInsight = async (
       if (trainedAt !== undefined && record.performedAt <= trainedAt) {
         continue;
       }
-      const entry = people.get(id);
-      if (entry !== undefined) {
-        entry.flaggedCount += 1;
+
+      // An entry is created if there is not one already. Previously the
+      // flag was only counted onto an existing entry, so anyone the
+      // inspector flagged whose failures were all supply or equipment
+      // disappeared from the queue completely.
+      const existing = people.get(id);
+
+      if (existing === undefined) {
+        const isHelper = id === record.helperId;
+        people.set(id, {
+          personId: id,
+          personName: (isHelper ? record.helperName : record.driverName) ?? 'Unknown',
+          areaName: record.areaName,
+          lastTrainedAt: trainedAt ?? null,
+          role: isHelper ? 'helper' : 'driver',
+          trainableCount: 0,
+          nonTrainableCount: 0,
+          flaggedCount: 1,
+          causes: [] as string[],
+          lastSeen: record.performedAt,
+          priority: 'session',
+          reason: 'Flagged by the inspector',
+        });
+        continue;
       }
+
+      existing.flaggedCount += 1;
     }
   }
 
