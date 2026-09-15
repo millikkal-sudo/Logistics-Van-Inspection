@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import { CaloMark } from './CaloMark';
 import { uploadPhoto } from '@/lib/supabaseBrowser';
 import type { FleetEntry } from '@/lib/fleetRepository';
+import type { OpenItem } from '@/lib/openItems';
 import {
   resolveStatus,
   type Area,
@@ -78,6 +79,8 @@ type Props = {
   causes: CheckCause[];
   actions: CheckAction[];
   initialToday: InspectionSummary[];
+  /** Failures not yet passed again. Shown before she starts, not after. */
+  openItems: OpenItem[];
   /** "Morning", "Evening", "Early morning". Resolved from the clock. */
   shiftLabel: string;
   canManage: boolean;
@@ -91,6 +94,7 @@ export const VanCheckApp = ({
   causes,
   actions,
   initialToday,
+  openItems,
   shiftLabel,
   canManage,
 }: Props) => {
@@ -339,6 +343,7 @@ export const VanCheckApp = ({
           <AreaList
             profile={profile}
             shiftLabel={shiftLabel}
+            openItems={openItems}
             areas={areas}
             fleet={fleet}
             today={today}
@@ -356,6 +361,7 @@ export const VanCheckApp = ({
             profile={profile}
             area={area}
             fleet={fleet.filter((entry) => entry.areaId === area.id)}
+            openItems={openItems}
             checkedPlates={checkedPlates}
             query={query}
             onQuery={setQuery}
@@ -398,6 +404,7 @@ export const VanCheckApp = ({
             onBack={() => setScreen('vans')}
             onSubmit={() => void submit()}
             onError={setError}
+            openItems={openItems.filter((item) => item.vanId === van.vanId)}
             onCorrected={(plate, driverName) =>
               setVan((current) =>
                 current === null ? null : { ...current, plate, driverName },
@@ -588,6 +595,7 @@ const Chip = ({ status }: { status: InspectionStatus }) => {
 const AreaList = ({
   profile,
   shiftLabel,
+  openItems,
   areas,
   fleet,
   today,
@@ -597,6 +605,7 @@ const AreaList = ({
 }: {
   profile: Profile;
   shiftLabel: string;
+  openItems: OpenItem[];
   areas: Area[];
   fleet: FleetEntry[];
   today: InspectionSummary[];
@@ -634,8 +643,26 @@ const AreaList = ({
             <div className="min-w-0 flex-1">
               <div className="text-sm font-bold text-content">{area.name}</div>
               <div className="text-xs text-content-secondary">
-                {vansHere === 0 ? 'No vans assigned yet' : `${doneHere} of ${vansHere} checked`}
+                {vansHere === 0 ? 'No vehicles assigned yet' : `${doneHere} of ${vansHere} checked`}
               </div>
+              {(() => {
+                // Shown before she picks, so the area with outstanding
+                // work is visible at the point the choice is made.
+                const open = openItems.filter((item) => item.areaId === area.id);
+                if (open.length === 0) {
+                  return null;
+                }
+                const oldest = open[0];
+                return (
+                  <div className="text-xs font-bold text-hold">
+                    {open.length} open from{' '}
+                    {new Date(oldest?.failedAt ?? '').toLocaleDateString('en-GB', {
+                      day: 'numeric',
+                      month: 'long',
+                    })}
+                  </div>
+                );
+              })()}
             </div>
             {vansHere > 0 && <span className="text-lg text-brand">›</span>}
           </button>
@@ -670,6 +697,7 @@ const VanList = ({
   profile,
   area,
   fleet,
+  openItems,
   checkedPlates,
   query,
   onQuery,
@@ -680,6 +708,7 @@ const VanList = ({
   profile: Profile;
   area: Area;
   fleet: FleetEntry[];
+  openItems: OpenItem[];
   checkedPlates: Map<string, InspectionStatus>;
   query: string;
   onQuery: (value: string) => void;
@@ -697,15 +726,18 @@ const VanList = ({
 
   const row = (entry: FleetEntry, dimmed: boolean): React.ReactNode => {
     const done = checkedPlates.get(entry.plate);
+    const open = openItems.filter((item) => item.vanId === entry.vanId);
     return (
       <div key={entry.vanId}>
         <button
           type="button"
           onClick={() => onPick(entry)}
           disabled={done !== undefined}
-          className={`flex w-full items-center gap-3 rounded-xl border border-line bg-surface-card p-4 text-left active:scale-[0.98] disabled:opacity-60 disabled:active:scale-100 ${
-            dimmed ? 'opacity-60' : ''
-          }`}
+          className={`flex w-full items-center gap-3 rounded-xl border bg-surface-card p-4 text-left active:scale-[0.98] disabled:opacity-60 disabled:active:scale-100 ${
+            open.length > 0 && done === undefined
+              ? 'border-line border-l-4 border-l-hold'
+              : 'border-line'
+          } ${dimmed ? 'opacity-60' : ''}`}
         >
           <div
             className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-xs font-bold text-content-invert ${
@@ -720,6 +752,12 @@ const VanList = ({
               {entry.driverName}
               {entry.helperName === null ? '' : ` + ${entry.helperName}`}
             </div>
+            {open.length > 0 && done === undefined && (
+              <div className="truncate text-xs font-bold text-hold">
+                Open: {open.map((item) => item.causeLabel ?? item.checkLabel).join(', ')} ·{' '}
+                {open[0]?.daysOpen === 0 ? 'today' : `${open[0]?.daysOpen ?? 0} days`}
+              </div>
+            )}
           </div>
           {done === undefined ? (
             <span className="text-lg text-brand">&rsaquo;</span>
@@ -939,6 +977,7 @@ const Checklist = ({
   onSubmit,
   onError,
   onCorrected,
+  openItems,
 }: {
   van: FleetEntry;
   checkItems: CheckItem[];
@@ -969,6 +1008,7 @@ const Checklist = ({
   onSubmit: () => void;
   onError: (message: string) => void;
   onCorrected: (plate: string, driverName: string) => void;
+  openItems: OpenItem[];
 }) => {
   let label = 'Submit check';
   if (saving) {
@@ -1023,6 +1063,31 @@ const Checklist = ({
                 {item.label}
               </div>
               <div className="mt-0.5 text-xs text-content-secondary">{item.helpText}</div>
+
+              {/* The specific thing to look at, on the specific check.
+                  A list she has to remember to open would not get
+                  opened at 06:30. */}
+              {(() => {
+                const previous = openItems.find((entry) => entry.checkCode === item.code);
+                if (previous === undefined) {
+                  return null;
+                }
+                return (
+                  <div className="mt-2 rounded-lg bg-hold-soft px-3 py-2 text-xs text-hold">
+                    <span className="font-bold">
+                      Failed{' '}
+                      {new Date(previous.failedAt).toLocaleDateString('en-GB', {
+                        day: 'numeric',
+                        month: 'long',
+                      })}
+                    </span>
+                    {previous.causeLabel === null ? '' : ` · ${previous.causeLabel.toLowerCase()}`}
+                    {previous.actionLabel === null
+                      ? ''
+                      : ` · ${previous.actionLabel.toLowerCase()}`}
+                  </div>
+                );
+              })()}
 
               {item.inputType === 'temperature' ? (
                 <div className="mt-3">
