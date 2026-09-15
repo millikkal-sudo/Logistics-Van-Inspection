@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BulkImport } from './BulkImport';
+import type { OpenItem } from '@/lib/openItems';
 import { CaloMark } from './CaloMark';
 import { PlateScanner, type PlateReading } from './PlateScanner';
 import type {
@@ -70,6 +71,7 @@ type Props = {
   causes: CheckCause[];
   actions: CheckAction[];
   checkItems: CheckItem[];
+  openItems: OpenItem[];
   isAdmin: boolean;
 };
 
@@ -80,6 +82,7 @@ export const AdminDashboard = ({
   causes,
   actions,
   checkItems,
+  openItems,
   isAdmin,
 }: Props) => {
   const router = useRouter();
@@ -209,7 +212,14 @@ export const AdminDashboard = ({
           </div>
         )}
 
-        {tab === 'reports' && <Reports areas={areas} />}
+        {tab === 'reports' && (
+          <>
+            <OpenItemsPanel openItems={openItems} />
+            <div className="mt-4">
+              <Reports areas={areas} />
+            </div>
+          </>
+        )}
 
 
         {tab === 'training' && <TrainingTab areas={areas} />}
@@ -971,6 +981,93 @@ const FilterChip = ({
         </span>
       )}
     </button>
+  );
+};
+
+/**
+ * Failures nobody has cleared.
+ *
+ * The number that matters is how long they stay open. Held Tuesday and
+ * cleared Wednesday is a working process; open for eleven days is not,
+ * and until now nothing in the system could tell the two apart.
+ */
+const OpenItemsPanel = ({ openItems }: { openItems: OpenItem[] }) => {
+  const [open, setOpen] = useState(false);
+
+  if (openItems.length === 0) {
+    return (
+      <div className="rounded-md border border-line bg-pass-soft p-4">
+        <p className="text-sm font-bold text-pass">Nothing outstanding</p>
+        <p className="mt-0.5 text-xs text-content-secondary">
+          Every failure recorded has since been passed on a later check.
+        </p>
+      </div>
+    );
+  }
+
+  const stale = openItems.filter((item) => item.daysOpen >= 3);
+  const oldest = openItems[0];
+
+  return (
+    <div className="overflow-hidden rounded-md border border-line bg-surface-card">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+      >
+        <div>
+          <div className="text-sm font-bold text-content">
+            {openItems.length} open item{openItems.length === 1 ? '' : 's'}
+          </div>
+          <p className="mt-0.5 text-xs text-content-secondary">
+            Failures not yet passed on a later check
+            {stale.length > 0 && (
+              <span className="font-bold text-hold">
+                {' '}
+                · {stale.length} open 3 days or more
+              </span>
+            )}
+            {oldest !== undefined && `, oldest ${oldest.daysOpen} days`}
+          </p>
+        </div>
+        <span className="shrink-0 text-xs font-bold text-brand">{open ? 'Hide' : 'Show'}</span>
+      </button>
+
+      {open && (
+        <div className="border-t border-line">
+          {openItems.map((item) => (
+            <div
+              key={`${item.vanId}-${item.checkItemId}`}
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-4 py-2.5 last:border-b-0"
+            >
+              <span
+                className={`w-14 shrink-0 text-xs font-bold ${
+                  item.daysOpen >= 3 ? 'text-fail' : 'text-content-secondary'
+                }`}
+              >
+                {item.daysOpen === 0 ? 'today' : `${item.daysOpen}d`}
+              </span>
+              <span className="text-sm font-bold text-content">{item.plate}</span>
+              <span className="text-xs text-content-secondary">
+                {item.areaName} · {item.driverName}
+              </span>
+              <span className="ml-auto text-xs text-content">
+                {item.checkLabel}
+                {item.causeLabel === null ? '' : `, ${item.causeLabel.toLowerCase()}`}
+              </span>
+              {item.actionLabel !== null && (
+                <span className="rounded bg-surface-page px-2 py-0.5 text-[11px] text-content-secondary">
+                  {item.actionLabel}
+                </span>
+              )}
+            </div>
+          ))}
+          <p className="px-4 py-2 text-[11px] text-content-secondary">
+            An item closes when the same vehicle passes the same check again. Nothing to mark off.
+          </p>
+        </div>
+      )}
+    </div>
   );
 };
 
