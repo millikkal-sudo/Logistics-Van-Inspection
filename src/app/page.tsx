@@ -8,6 +8,7 @@ import {
 } from '@/lib/fleetRepository';
 import { listCheckItems, listInspectionsSince } from '@/lib/inspectionRepository';
 import { currentProfile, ForbiddenError, UnauthorizedError } from '@/lib/session';
+import { listOpenItems } from '@/lib/openItems';
 import { resolveShift } from '@/lib/shift';
 
 /**
@@ -23,12 +24,13 @@ const HomePage = async () => {
     // shift starting at 19:00 finishes after midnight.
     const shift = resolveShift();
 
-    const [areas, fleet, checkItems, causes, actions, today] = await Promise.all([
+    const [areas, fleet, checkItems, causes, actions, openItems, today] = await Promise.all([
       listAreas(),
       listFleet(),
       listCheckItems(),
       listCauses(),
       listActions(),
+      listOpenItems(),
 
       listInspectionsSince(shift.from, { until: shift.to }),
     ]);
@@ -42,6 +44,7 @@ const HomePage = async () => {
         causes={causes}
         actions={actions}
         initialToday={today}
+        openItems={openItems}
         shiftLabel={shift.label}
 
         canManage={profile.role === 'manager' || profile.role === 'admin'}
