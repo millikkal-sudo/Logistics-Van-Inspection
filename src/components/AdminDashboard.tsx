@@ -16,7 +16,7 @@ import type {
   Van,
 } from '@/lib/types';
 
-type Tab = 'reports' | 'training' | 'areas' | 'vans' | 'drivers' | 'options';
+type Tab = 'reports' | 'training' | 'awards' | 'areas' | 'vans' | 'drivers' | 'options';
 
 type ReportRow = {
   id: string;
@@ -168,7 +168,8 @@ export const AdminDashboard = ({
         )}
 
         <nav className="mt-4 flex gap-1 overflow-x-auto">
-          {(['reports', 'training', 'areas', 'vans', 'drivers', 'options'] as Tab[]).map((key) => (
+          {(['reports', 'training', 'awards', 'areas', 'vans', 'drivers', 'options'] as Tab[]).map(
+            (key) => (
             <button
               key={key}
               type="button"
@@ -179,7 +180,8 @@ export const AdminDashboard = ({
             >
               {key}
             </button>
-          ))}
+            ),
+          )}
         </nav>
       </header>
 
@@ -223,6 +225,8 @@ export const AdminDashboard = ({
 
 
         {tab === 'training' && <TrainingTab areas={areas} />}
+
+        {tab === 'awards' && <AwardsTab />}
 
         {tab === 'options' && (
           <OptionsTab
@@ -1067,6 +1071,154 @@ const OpenItemsPanel = ({ openItems }: { openItems: OpenItem[] }) => {
           </p>
         </div>
       )}
+    </div>
+  );
+};
+
+type Candidate = {
+  personId: string;
+  personName: string;
+  areaName: string;
+  plate: string;
+  inspections: number;
+  clean: number;
+  cleanPct: number;
+};
+
+type ZoneAward = {
+  zone: number;
+  zoneName: string;
+  winner: Candidate | null;
+  runnersUp: Candidate[];
+  note: string | null;
+  excludedCount: number;
+  excludedReasons: string[];
+};
+
+/**
+ * Driver of the month, one per zone.
+ *
+ * The reasoning is shown, not just the result. An award nobody can audit
+ * gets argued about, and a suspiciously clean record should be visible
+ * rather than hidden behind a rosette.
+ */
+const AwardsTab = () => {
+  const dubaiNow = new Date(Date.now() + 4 * 60 * 60 * 1000);
+  const [month, setMonth] = useState(dubaiNow.toISOString().slice(0, 7));
+  const [awards, setAwards] = useState<ZoneAward[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/awards?month=${month}`);
+      if (response.ok) {
+        setAwards((await response.json()) as ZoneAward[]);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [month]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const monthLabel = new Date(`${month}-01T00:00:00Z`).toLocaleDateString('en-GB', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3 rounded-md border border-line bg-surface-card p-4">
+        <Field label="Month">
+          <input
+            type="month"
+            value={month}
+            onChange={(event) => setMonth(event.target.value)}
+            className={inputClass}
+          />
+        </Field>
+        <p className="pb-2 text-xs text-content-secondary">
+          Ranked on clean inspections, minimum 4 to qualify. Ties break on the higher number of
+          inspections.
+        </p>
+      </div>
+
+      {loading && <p className="p-8 text-center text-sm text-content-secondary">Loading…</p>}
+
+      {!loading &&
+        awards?.map((award) => (
+          <div
+            key={award.zone}
+            className="overflow-hidden rounded-md border border-line bg-surface-card"
+          >
+            <div className="border-b border-line px-4 py-3">
+              <div className="text-sm font-bold text-content">{award.zoneName}</div>
+              <p className="mt-0.5 text-xs text-content-secondary">{monthLabel}</p>
+            </div>
+
+            {award.winner === null ? (
+              <p className="px-4 py-8 text-center text-sm text-content-secondary">{award.note}</p>
+            ) : (
+              <>
+                <div className="flex items-center gap-4 bg-pass-soft px-4 py-4">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-pass text-xl text-content-invert">
+                    ★
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-lg font-bold text-content">
+                      {award.winner.personName}
+                    </div>
+                    <div className="text-xs text-content-secondary">
+                      {award.winner.areaName} · {award.winner.plate}
+                    </div>
+                    <div className="mt-0.5 text-xs font-bold text-pass">
+                      {award.winner.inspections} inspections, {award.winner.clean} clean
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="text-2xl font-black text-pass">{award.winner.cleanPct}%</div>
+                    <div className="text-[11px] text-content-secondary">clean</div>
+                  </div>
+                </div>
+
+                {award.runnersUp.length > 0 && (
+                  <>
+                    <div className="border-b border-line bg-surface-page px-4 py-2 text-[11px] font-bold uppercase tracking-wide text-content-secondary">
+                      Runners up
+                    </div>
+                    {award.runnersUp.map((person, index) => (
+                      <div
+                        key={person.personId}
+                        className="flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0"
+                      >
+                        <span className="w-4 text-xs text-content-secondary">{index + 2}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm text-content">{person.personName}</div>
+                          <div className="text-xs text-content-secondary">
+                            {person.areaName} · {person.inspections} inspections, {person.clean}{' '}
+                            clean
+                          </div>
+                        </div>
+                        <span className="text-sm text-content">{person.cleanPct}%</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </>
+            )}
+
+            {award.excludedCount > 0 && (
+              <p className="border-t border-line px-4 py-2 text-[11px] text-content-secondary">
+                {award.excludedCount} driver{award.excludedCount === 1 ? '' : 's'} not in the
+                running: {award.excludedReasons.join(', ')}.
+              </p>
+            )}
+          </div>
+        ))}
     </div>
   );
 };
