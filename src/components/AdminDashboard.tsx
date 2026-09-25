@@ -1088,6 +1088,7 @@ type Candidate = {
 type ZoneAward = {
   zone: number;
   zoneName: string;
+  minimum: number;
   winner: Candidate | null;
   runnersUp: Candidate[];
   note: string | null;
@@ -1142,8 +1143,8 @@ const AwardsTab = () => {
           />
         </Field>
         <p className="pb-2 text-xs text-content-secondary">
-          Ranked on clean inspections, minimum 4 to qualify. Ties break on the higher number of
-          inspections.
+          Ranked on clean inspections. The bar adapts per zone, since Dubai is inspected daily and
+          Fujairah fortnightly. Ties break on the higher number of inspections.
         </p>
       </div>
 
@@ -1157,7 +1158,10 @@ const AwardsTab = () => {
           >
             <div className="border-b border-line px-4 py-3">
               <div className="text-sm font-bold text-content">{award.zoneName}</div>
-              <p className="mt-0.5 text-xs text-content-secondary">{monthLabel}</p>
+              <p className="mt-0.5 text-xs text-content-secondary">
+                {monthLabel} · {award.minimum} inspection{award.minimum === 1 ? '' : 's'} to
+                qualify
+              </p>
             </div>
 
             {award.winner === null ? (
