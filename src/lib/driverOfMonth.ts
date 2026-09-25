@@ -14,8 +14,24 @@ import { listInspectionsSince } from './inspectionRepository';
  * lottery among whoever happened to be checked twice.
  */
 
-/** Below this there is not enough evidence to call anyone the best. */
-const MIN_INSPECTIONS = 4;
+/**
+ * The bar adapts to the zone.
+ *
+ * A fixed minimum cannot serve both Dubai and Fujairah. Dubai vans are
+ * inspected daily, so four is nothing; Fujairah is visited fortnightly,
+ * so four is impossible and that zone would never produce a winner.
+ *
+ * Instead: a third of whatever the most-inspected driver in that zone
+ * managed, with a floor of two. The winner has to have been checked
+ * comparably often to their own zone's busiest driver, and one lucky
+ * pass still cannot take it.
+ */
+const ABSOLUTE_FLOOR = 2;
+
+const minimumFor = (inspectionCounts: number[]): number => {
+  const busiest = Math.max(0, ...inspectionCounts);
+  return Math.max(ABSOLUTE_FLOOR, Math.ceil(busiest / 3));
+};
 
 export const ZONE_NAMES: Record<number, string> = {
   1: 'Dubai',
@@ -36,6 +52,8 @@ export type Candidate = {
 export type ZoneAward = {
   zone: number;
   zoneName: string;
+  /** The bar for this zone, so the panel can explain itself. */
+  minimum: number;
   winner: Candidate | null;
   runnersUp: Candidate[];
   /** Why there is no winner, when there isn't one. */
@@ -108,12 +126,14 @@ export const getDriverOfMonth = async (month: string): Promise<ZoneAward[]> => {
   return [1, 2, 3].map((zone) => {
     const inZone = [...people.values()].filter((person) => person.zone === zone);
 
+    const minimum = minimumFor(inZone.map((person) => person.inspections));
+
     const excluded = inZone.filter(
-      (person) => person.disqualified !== null || person.inspections < MIN_INSPECTIONS,
+      (person) => person.disqualified !== null || person.inspections < minimum,
     );
 
     const eligible = inZone
-      .filter((person) => person.disqualified === null && person.inspections >= MIN_INSPECTIONS)
+      .filter((person) => person.disqualified === null && person.inspections >= minimum)
       .map((person) => ({
         ...person,
         cleanPct: Math.round((person.clean / person.inspections) * 100),
@@ -125,6 +145,7 @@ export const getDriverOfMonth = async (month: string): Promise<ZoneAward[]> => {
     return {
       zone,
       zoneName: ZONE_NAMES[zone] ?? `Zone ${zone}`,
+      minimum,
       winner: eligible[0] ?? null,
       runnersUp: eligible.slice(1, 4),
       note:
@@ -132,12 +153,12 @@ export const getDriverOfMonth = async (month: string): Promise<ZoneAward[]> => {
           ? null
           : inZone.length === 0
             ? 'No inspections in this zone this month'
-            : `Nobody reached ${MIN_INSPECTIONS} inspections`,
+            : `Nobody reached ${minimum} inspection${minimum === 1 ? '' : 's'} this month`,
       excludedCount: excluded.length,
       excludedReasons: [
         ...new Set(
           excluded.map(
-            (person) => person.disqualified ?? `fewer than ${MIN_INSPECTIONS} inspections`,
+            (person) => person.disqualified ?? `fewer than ${minimum} inspections`,
           ),
         ),
       ],
