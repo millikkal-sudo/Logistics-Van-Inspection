@@ -1,5 +1,12 @@
 import { NextResponse } from 'next/server';
-import { addComplaint, listComplaints, removeComplaint } from '@/lib/complaints';
+import {
+  addComplaint,
+  importComplaints,
+  listComplaints,
+  previewComplaints,
+  removeComplaint,
+} from '@/lib/complaints';
+import { fetchSheetCsv, SheetError } from '@/lib/googleSheet';
 import { ValidationError } from '@/lib/inspectionRepository';
 import { currentProfile, ForbiddenError, requireRole, UnauthorizedError } from '@/lib/session';
 
@@ -10,7 +17,7 @@ const fail = (cause: unknown): NextResponse => {
   if (cause instanceof ForbiddenError) {
     return NextResponse.json({ error: cause.message }, { status: 403 });
   }
-  if (cause instanceof ValidationError) {
+  if (cause instanceof SheetError || cause instanceof ValidationError) {
     return NextResponse.json({ error: cause.message }, { status: 422 });
   }
   const message = cause instanceof Error ? cause.message : 'Unexpected error';
@@ -45,6 +52,30 @@ export const POST = async (request: Request): Promise<NextResponse> => {
     }
 
     const payload = body as Record<string, unknown>;
+
+    // A month of complaints arrives as a list, not one at a time.
+    // Always previewed first, then committed, so a misspelled name is
+    // caught before it lands on the wrong person.
+    const sheetUrl = typeof payload.sheetUrl === 'string' ? payload.sheetUrl.trim() : '';
+    const pasted = typeof payload.text === 'string' ? payload.text : '';
+
+    if (sheetUrl !== '' || pasted.trim() !== '') {
+      const text = sheetUrl === '' ? pasted : await fetchSheetCsv(sheetUrl);
+      const defaultDate =
+        typeof payload.occurredOn === 'string' && payload.occurredOn !== ''
+          ? payload.occurredOn
+          : new Date().toISOString().slice(0, 10);
+
+      const preview = await previewComplaints(text, defaultDate);
+
+      if (payload.commit !== true) {
+        return NextResponse.json(preview);
+      }
+
+      const imported = await importComplaints(preview.valid, profile);
+      return NextResponse.json({ ...preview, imported });
+    }
+
     const driverId = payload.driverId;
 
     if (typeof driverId !== 'string' || driverId === '') {
