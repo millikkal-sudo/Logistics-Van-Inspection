@@ -1096,6 +1096,10 @@ const ComplaintsLog = ({
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<'paste' | 'one'>('paste');
+  const [text, setText] = useState('');
+  const [sheetUrl, setSheetUrl] = useState('');
+  const [preview, setPreview] = useState<ComplaintPreview | null>(null);
 
   const monthStart = `${month}-01`;
   const monthEnd = new Date(
@@ -1114,6 +1118,37 @@ const ComplaintsLog = ({
   useEffect(() => {
     void load();
   }, [load]);
+
+  /** Previewed before anything is written: a misspelled name would put
+      a complaint on the wrong person and cost them the award. */
+  const send = async (commitNow: boolean): Promise<void> => {
+    setBusy(true);
+    try {
+      const response = await fetch('/api/complaints', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, sheetUrl, occurredOn, commit: commitNow }),
+      });
+      if (!response.ok) {
+        return;
+      }
+      const body = (await response.json()) as ComplaintPreview & { imported?: number };
+      setPreview(body);
+
+      if (commitNow) {
+        setText('');
+        setSheetUrl('');
+        setPreview(null);
+        await load();
+        onChanged();
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const check = (): Promise<void> => send(false);
+  const commit = (): Promise<void> => send(true);
 
   const add = async (): Promise<void> => {
     setBusy(true);
@@ -1161,6 +1196,103 @@ const ComplaintsLog = ({
 
       {open && (
         <div className="border-t border-line">
+          <div className="border-b border-line bg-surface-page p-4">
+            <div className="flex gap-2">
+              {(['paste', 'one'] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => {
+                    setMode(option);
+                    setPreview(null);
+                  }}
+                  className={`rounded-full px-4 py-2 text-xs font-bold ${
+                    mode === option
+                      ? 'bg-brand-action text-content-invert'
+                      : 'border border-line bg-surface-card text-content-secondary'
+                  }`}
+                >
+                  {option === 'paste' ? 'Upload the month' : 'Add one'}
+                </button>
+              ))}
+            </div>
+
+            {mode === 'paste' && (
+              <div className="mt-3 space-y-2">
+                <div className="rounded-sm border border-line bg-surface-card p-3 text-xs text-content-secondary">
+                  <span className="font-mono font-bold text-content">
+                    name, date, source, note
+                  </span>
+                  <br />
+                  Keep the header row. Names must match the Drivers tab exactly. Dates can be
+                  2026-09-30 or 30/09/2026, and a blank date uses the one below.
+                </div>
+
+                <textarea
+                  value={text}
+                  onChange={(event) => {
+                    setText(event.target.value);
+                    setPreview(null);
+                  }}
+                  rows={5}
+                  placeholder={`name,date,source,note\nSajid,30/09/2026,App review,Late and rude\nSultan,28/09/2026,CS ticket,`}
+                  className="w-full resize-y rounded-sm border border-line bg-surface-card p-3 font-mono text-xs text-content outline-none"
+                />
+
+                <input
+                  value={sheetUrl}
+                  onChange={(event) => {
+                    setSheetUrl(event.target.value);
+                    setPreview(null);
+                  }}
+                  placeholder="or paste a Google Sheet link"
+                  className="w-full rounded-sm border border-line bg-surface-card p-3 font-mono text-xs text-content outline-none"
+                />
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void check()}
+                    disabled={busy || (text.trim() === '' && sheetUrl.trim() === '')}
+                    className="rounded-sm bg-brand-action px-5 py-2 text-xs font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
+                  >
+                    {busy ? 'Checking…' : 'Check the list'}
+                  </button>
+
+                  {preview !== null && preview.valid.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => void commit()}
+                      disabled={busy}
+                      className="rounded-sm bg-pass px-5 py-2 text-xs font-bold text-content-invert"
+                    >
+                      Log {preview.valid.length} complaint
+                      {preview.valid.length === 1 ? '' : 's'}
+                    </button>
+                  )}
+                </div>
+
+                {preview !== null && preview.issues.length > 0 && (
+                  <div className="overflow-hidden rounded-sm border border-line">
+                    <div className="bg-fail-soft px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-fail">
+                      {preview.issues.length} row{preview.issues.length === 1 ? '' : 's'} skipped
+                    </div>
+                    {preview.issues.map((issue) => (
+                      <div
+                        key={`${issue.line}-${issue.reason}`}
+                        className="border-t border-line bg-surface-card px-3 py-2 text-xs"
+                      >
+                        <span className="mr-2 text-content-secondary">Line {issue.line}</span>
+                        <span className="font-bold text-fail">{issue.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {mode === 'one' && (
           <div className="flex flex-wrap items-end gap-3 bg-surface-page p-4">
             <Field label="Who">
               <select
@@ -1211,6 +1343,7 @@ const ComplaintsLog = ({
               Log it
             </button>
           </div>
+          )}
 
           {items.map((item) => (
             <div
@@ -1241,6 +1374,11 @@ const ComplaintsLog = ({
       )}
     </div>
   );
+};
+
+type ComplaintPreview = {
+  valid: { line: number; driverName: string; occurredOn: string }[];
+  issues: { line: number; input: string; reason: string }[];
 };
 
 type ComplaintRow = {
