@@ -226,7 +226,7 @@ export const AdminDashboard = ({
 
         {tab === 'training' && <TrainingTab areas={areas} />}
 
-        {tab === 'awards' && <AwardsTab />}
+        {tab === 'awards' && <AwardsTab drivers={drivers} />}
 
         {tab === 'options' && (
           <OptionsTab
@@ -1075,6 +1075,183 @@ const OpenItemsPanel = ({ openItems }: { openItems: OpenItem[] }) => {
   );
 };
 
+/**
+ * Complaints are logged here rather than in the Drivers tab: this is
+ * the screen where they matter, and keeping the criteria and the
+ * evidence together means nobody has to go looking.
+ */
+const ComplaintsLog = ({
+  drivers,
+  month,
+  onChanged,
+}: {
+  drivers: Driver[];
+  month: string;
+  onChanged: () => void;
+}) => {
+  const [items, setItems] = useState<ComplaintRow[]>([]);
+  const [driverId, setDriverId] = useState('');
+  const [occurredOn, setOccurredOn] = useState(new Date().toISOString().slice(0, 10));
+  const [source, setSource] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const monthStart = `${month}-01`;
+  const monthEnd = new Date(
+    Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0),
+  )
+    .toISOString()
+    .slice(0, 10);
+
+  const load = useCallback(async (): Promise<void> => {
+    const response = await fetch(`/api/complaints?from=${monthStart}&to=${monthEnd}`);
+    if (response.ok) {
+      setItems((await response.json()) as ComplaintRow[]);
+    }
+  }, [monthStart, monthEnd]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const add = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      const response = await fetch('/api/complaints', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driverId, occurredOn, source, note }),
+      });
+      if (response.ok) {
+        setDriverId('');
+        setSource('');
+        setNote('');
+        await load();
+        onChanged();
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (id: string): Promise<void> => {
+    await fetch(`/api/complaints?id=${id}`, { method: 'DELETE' });
+    await load();
+    onChanged();
+  };
+
+  return (
+    <div className="overflow-hidden rounded-md border border-line bg-surface-card">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+      >
+        <div>
+          <div className="text-sm font-bold text-content">Customer complaints</div>
+          <p className="mt-0.5 text-xs text-content-secondary">
+            {items.length === 0
+              ? 'None logged this month'
+              : `${items.length} this month, each one rules that driver out`}
+          </p>
+        </div>
+        <span className="shrink-0 text-xs font-bold text-brand">{open ? 'Hide' : 'Manage'}</span>
+      </button>
+
+      {open && (
+        <div className="border-t border-line">
+          <div className="flex flex-wrap items-end gap-3 bg-surface-page p-4">
+            <Field label="Who">
+              <select
+                value={driverId}
+                onChange={(event) => setDriverId(event.target.value)}
+                className={inputClass}
+              >
+                <option value="">Choose a person</option>
+                {drivers
+                  .filter((person) => person.active)
+                  .map((person) => (
+                    <option key={person.id} value={person.id}>
+                      {person.fullName}
+                    </option>
+                  ))}
+              </select>
+            </Field>
+            <Field label="When">
+              <input
+                type="date"
+                value={occurredOn}
+                onChange={(event) => setOccurredOn(event.target.value)}
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Source">
+              <input
+                value={source}
+                onChange={(event) => setSource(event.target.value)}
+                placeholder="App review, call, CS ticket"
+                className={inputClass}
+              />
+            </Field>
+            <Field label="What happened">
+              <input
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                placeholder="Optional"
+                className={inputClass}
+              />
+            </Field>
+            <button
+              type="button"
+              onClick={() => void add()}
+              disabled={busy || driverId === ''}
+              className="rounded-sm bg-brand-action px-5 py-2.5 text-sm font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
+            >
+              Log it
+            </button>
+          </div>
+
+          {items.map((item) => (
+            <div
+              key={item.id}
+              className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-2.5"
+            >
+              <span className="text-sm font-bold text-content">{item.driverName}</span>
+              <span className="text-xs text-content-secondary">
+                {new Date(item.occurredOn).toLocaleDateString('en-GB', {
+                  day: 'numeric',
+                  month: 'short',
+                })}
+                {item.source === null ? '' : ` · ${item.source}`}
+              </span>
+              {item.note !== null && (
+                <span className="text-xs text-content-secondary">{item.note}</span>
+              )}
+              <button
+                type="button"
+                onClick={() => void remove(item.id)}
+                className="ml-auto text-xs font-bold text-fail"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+type ComplaintRow = {
+  id: string;
+  driverId: string | null;
+  driverName: string;
+  occurredOn: string;
+  source: string | null;
+  note: string | null;
+};
+
 type Candidate = {
   personId: string;
   personName: string;
@@ -1083,6 +1260,7 @@ type Candidate = {
   inspections: number;
   clean: number;
   cleanPct: number;
+  complaints: number;
 };
 
 type ZoneAward = {
@@ -1103,7 +1281,7 @@ type ZoneAward = {
  * gets argued about, and a suspiciously clean record should be visible
  * rather than hidden behind a rosette.
  */
-const AwardsTab = () => {
+const AwardsTab = ({ drivers }: { drivers: Driver[] }) => {
   const dubaiNow = new Date(Date.now() + 4 * 60 * 60 * 1000);
   const [month, setMonth] = useState(dubaiNow.toISOString().slice(0, 7));
   const [awards, setAwards] = useState<ZoneAward[] | null>(null);
@@ -1142,10 +1320,13 @@ const AwardsTab = () => {
             className={inputClass}
           />
         </Field>
-        <p className="pb-2 text-xs text-content-secondary">
-          Ranked on clean inspections. The bar adapts per zone, since Dubai is inspected daily and
-          Fujairah fortnightly. Ties break on the higher number of inspections.
-        </p>
+        <div className="pb-1">
+          <p className="text-xs font-bold text-content">Two things to win</p>
+          <p className="mt-0.5 text-xs text-content-secondary">
+            Every inspection clean, and no customer complaints. Whoever managed that across the
+            most inspections takes it.
+          </p>
+        </div>
       </div>
 
       {loading && <p className="p-8 text-center text-sm text-content-secondary">Loading…</p>}
@@ -1159,8 +1340,8 @@ const AwardsTab = () => {
             <div className="border-b border-line px-4 py-3">
               <div className="text-sm font-bold text-content">{award.zoneName}</div>
               <p className="mt-0.5 text-xs text-content-secondary">
-                {monthLabel} · {award.minimum} inspection{award.minimum === 1 ? '' : 's'} to
-                qualify
+                {monthLabel} · at least {award.minimum} inspection
+                {award.minimum === 1 ? '' : 's'} to qualify
               </p>
             </div>
 
@@ -1179,13 +1360,20 @@ const AwardsTab = () => {
                     <div className="text-xs text-content-secondary">
                       {award.winner.areaName} · {award.winner.plate}
                     </div>
-                    <div className="mt-0.5 text-xs font-bold text-pass">
-                      {award.winner.inspections} inspections, {award.winner.clean} clean
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      <span className="rounded-full bg-pass px-2.5 py-0.5 text-[11px] font-bold text-content-invert">
+                        {award.winner.inspections} inspections, all clean
+                      </span>
+                      <span className="rounded-full bg-pass px-2.5 py-0.5 text-[11px] font-bold text-content-invert">
+                        No complaints
+                      </span>
                     </div>
                   </div>
                   <div className="shrink-0 text-right">
-                    <div className="text-2xl font-black text-pass">{award.winner.cleanPct}%</div>
-                    <div className="text-[11px] text-content-secondary">clean</div>
+                    <div className="text-3xl font-black text-pass">
+                      {award.winner.inspections}
+                    </div>
+                    <div className="text-[11px] text-content-secondary">clean checks</div>
                   </div>
                 </div>
 
@@ -1203,11 +1391,12 @@ const AwardsTab = () => {
                         <div className="min-w-0 flex-1">
                           <div className="text-sm text-content">{person.personName}</div>
                           <div className="text-xs text-content-secondary">
-                            {person.areaName} · {person.inspections} inspections, {person.clean}{' '}
-                            clean
+                            {person.areaName} · {person.inspections} clean checks
                           </div>
                         </div>
-                        <span className="text-sm text-content">{person.cleanPct}%</span>
+                        <span className="text-sm font-bold text-content">
+                          {person.inspections}
+                        </span>
                       </div>
                     ))}
                   </>
@@ -1223,6 +1412,8 @@ const AwardsTab = () => {
             )}
           </div>
         ))}
+
+      <ComplaintsLog drivers={drivers} month={month} onChanged={() => void load()} />
     </div>
   );
 };
