@@ -1,6 +1,7 @@
 import { serviceClient } from './supabaseClients';
 import { dubaiDayRange } from './shift';
 import { listInspectionsSince } from './inspectionRepository';
+import { listComplaints } from './complaints';
 
 /**
  * Driver of the month, one per zone.
@@ -15,7 +16,12 @@ import { listInspectionsSince } from './inspectionRepository';
  */
 
 /**
- * The bar adapts to the zone.
+ * The bar adapts to the zone, and is computed from the people still in
+ * the running.
+ *
+ * Including disqualified drivers was a bug: one disqualified driver with
+ * twelve inspections pushed the bar to four and excluded everyone left,
+ * so a zone with real inspections produced no winner at all.
  *
  * A fixed minimum cannot serve both Dubai and Fujairah. Dubai vans are
  * inspected daily, so four is nothing; Fujairah is visited fortnightly,
@@ -47,6 +53,7 @@ export type Candidate = {
   inspections: number;
   clean: number;
   cleanPct: number;
+  complaints: number;
 };
 
 export type ZoneAward = {
@@ -72,10 +79,21 @@ export const getDriverOfMonth = async (month: string): Promise<ZoneAward[]> => {
   const range = dubaiDayRange(start.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
   const db = serviceClient();
 
-  const [{ data: areaRows }, records] = await Promise.all([
+  const [{ data: areaRows }, records, complaints] = await Promise.all([
     db.from('areas').select('name, award_zone'),
     listInspectionsSince(range.from, { until: range.to }),
+    listComplaints(start.toISOString().slice(0, 10), end.toISOString().slice(0, 10)),
   ]);
+
+  const complaintsByDriver = new Map<string, number>();
+  for (const complaint of complaints) {
+    if (complaint.driverId !== null) {
+      complaintsByDriver.set(
+        complaint.driverId,
+        (complaintsByDriver.get(complaint.driverId) ?? 0) + 1,
+      );
+    }
+  }
 
   const zoneOfArea = new Map<string, number>();
   for (const area of (areaRows ?? []) as AreaZone[]) {
@@ -101,6 +119,7 @@ export const getDriverOfMonth = async (month: string): Promise<ZoneAward[]> => {
       inspections: 0,
       clean: 0,
       cleanPct: 0,
+      complaints: complaintsByDriver.get(record.driverId) ?? 0,
       zone,
       disqualified: null,
     };
@@ -119,6 +138,14 @@ export const getDriverOfMonth = async (month: string): Promise<ZoneAward[]> => {
     if (record.trainingFlag === 'driver' || record.trainingFlag === 'both') {
       entry.disqualified = entry.disqualified ?? 'flagged for training';
     }
+    // The two criteria: a clean inspection record and no complaints.
+    // A perfect record means nothing if customers are complaining.
+    if (entry.complaints > 0) {
+      entry.disqualified = entry.disqualified ?? 'customer complaint';
+    }
+    if (record.status !== 'compliant') {
+      entry.disqualified = entry.disqualified ?? 'non-compliant inspection';
+    }
 
     people.set(record.driverId, entry);
   }
@@ -126,14 +153,16 @@ export const getDriverOfMonth = async (month: string): Promise<ZoneAward[]> => {
   return [1, 2, 3].map((zone) => {
     const inZone = [...people.values()].filter((person) => person.zone === zone);
 
-    const minimum = minimumFor(inZone.map((person) => person.inspections));
+    // Computed from the people still standing, not everyone in the zone.
+    const standing = inZone.filter((person) => person.disqualified === null);
+    const minimum = minimumFor(standing.map((person) => person.inspections));
 
     const excluded = inZone.filter(
       (person) => person.disqualified !== null || person.inspections < minimum,
     );
 
-    const eligible = inZone
-      .filter((person) => person.disqualified === null && person.inspections >= minimum)
+    const eligible = standing
+      .filter((person) => person.inspections >= minimum)
       .map((person) => ({
         ...person,
         cleanPct: Math.round((person.clean / person.inspections) * 100),
@@ -153,7 +182,7 @@ export const getDriverOfMonth = async (month: string): Promise<ZoneAward[]> => {
           ? null
           : inZone.length === 0
             ? 'No inspections in this zone this month'
-            : `Nobody reached ${minimum} inspection${minimum === 1 ? '' : 's'} this month`,
+            : 'Everyone in this zone had a complaint, a failure or a training flag',
       excludedCount: excluded.length,
       excludedReasons: [
         ...new Set(
