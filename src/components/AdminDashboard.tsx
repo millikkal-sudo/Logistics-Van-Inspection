@@ -1399,6 +1399,9 @@ type Candidate = {
   clean: number;
   cleanPct: number;
   complaints: number;
+  vehicles: string[];
+  disqualified: string | null;
+  metMinimum: boolean;
 };
 
 type ZoneAward = {
@@ -1407,6 +1410,7 @@ type ZoneAward = {
   minimum: number;
   winner: Candidate | null;
   runnersUp: Candidate[];
+  standings: Candidate[];
   note: string | null;
   excludedCount: number;
   excludedReasons: string[];
@@ -1496,7 +1500,7 @@ const AwardsTab = ({ drivers }: { drivers: Driver[] }) => {
                       {award.winner.personName}
                     </div>
                     <div className="text-xs text-content-secondary">
-                      {award.winner.areaName} · {award.winner.plate}
+                      {award.winner.areaName} · {award.winner.vehicles.join(', ')}
                     </div>
                     <div className="mt-1 flex flex-wrap gap-1.5">
                       <span className="rounded-full bg-pass px-2.5 py-0.5 text-[11px] font-bold text-content-invert">
@@ -1515,29 +1519,8 @@ const AwardsTab = ({ drivers }: { drivers: Driver[] }) => {
                   </div>
                 </div>
 
-                {award.runnersUp.length > 0 && (
-                  <>
-                    <div className="border-b border-line bg-surface-page px-4 py-2 text-[11px] font-bold uppercase tracking-wide text-content-secondary">
-                      Runners up
-                    </div>
-                    {award.runnersUp.map((person, index) => (
-                      <div
-                        key={person.personId}
-                        className="flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0"
-                      >
-                        <span className="w-4 text-xs text-content-secondary">{index + 2}</span>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm text-content">{person.personName}</div>
-                          <div className="text-xs text-content-secondary">
-                            {person.areaName} · {person.inspections} clean checks
-                          </div>
-                        </div>
-                        <span className="text-sm font-bold text-content">
-                          {person.inspections}
-                        </span>
-                      </div>
-                    ))}
-                  </>
+                {award.standings.length > 1 && (
+                  <Standings standings={award.standings} />
                 )}
               </>
             )}
@@ -1553,6 +1536,107 @@ const AwardsTab = ({ drivers }: { drivers: Driver[] }) => {
 
       <ComplaintsLog drivers={drivers} month={month} onChanged={() => void load()} />
     </div>
+  );
+};
+
+/**
+ * Everyone in the zone, ranked, with each criterion in its own column.
+ *
+ * The winner is only ever the top of this. Showing the whole list means
+ * a judgement call can be made on the evidence rather than on trust:
+ * someone ruled out for one complaint but otherwise spotless is visible
+ * here, and might still deserve a word.
+ */
+const Standings = ({ standings }: { standings: Candidate[] }) => {
+  const [open, setOpen] = useState(false);
+  const inTheRunning = standings.filter(
+    (person) => person.disqualified === null && person.metMinimum,
+  ).length;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between gap-3 border-b border-line bg-surface-page px-4 py-2 text-left"
+      >
+        <span className="text-[11px] font-bold uppercase tracking-wide text-content-secondary">
+          Full standings · {standings.length} drivers, {inTheRunning} in the running
+        </span>
+        <span className="text-xs font-bold text-brand">{open ? 'Hide' : 'Show'}</span>
+      </button>
+
+      {open && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-line bg-surface-page text-content-secondary">
+                <th className="px-4 py-2 font-medium">#</th>
+                <th className="px-2 py-2 font-medium">Driver</th>
+                <th className="px-2 py-2 font-medium">Area</th>
+                <th className="px-2 py-2 font-medium">Vehicles</th>
+                <th className="px-2 py-2 text-right font-medium">Checks</th>
+                <th className="px-2 py-2 text-right font-medium">Clean</th>
+                <th className="px-2 py-2 text-right font-medium">Complaints</th>
+                <th className="px-4 py-2 font-medium">Standing</th>
+              </tr>
+            </thead>
+            <tbody>
+              {standings.map((person, index) => {
+                const running = person.disqualified === null && person.metMinimum;
+                return (
+                  <tr
+                    key={person.personId}
+                    className={`border-b border-line last:border-b-0 ${
+                      running ? '' : 'bg-surface-page'
+                    }`}
+                  >
+                    <td className="px-4 py-2 text-content-secondary">
+                      {running ? index + 1 : '—'}
+                    </td>
+                    <td className="px-2 py-2 font-bold text-content">{person.personName}</td>
+                    <td className="px-2 py-2 text-content-secondary">{person.areaName}</td>
+                    <td className="px-2 py-2 text-content-secondary">
+                      {person.vehicles.join(', ')}
+                    </td>
+                    <td className="px-2 py-2 text-right text-content">{person.inspections}</td>
+                    <td
+                      className={`px-2 py-2 text-right font-bold ${
+                        person.cleanPct === 100 ? 'text-pass' : 'text-content-secondary'
+                      }`}
+                    >
+                      {person.clean}
+                    </td>
+                    <td
+                      className={`px-2 py-2 text-right font-bold ${
+                        person.complaints > 0 ? 'text-fail' : 'text-content-secondary'
+                      }`}
+                    >
+                      {person.complaints}
+                    </td>
+                    <td className="px-4 py-2">
+                      {person.disqualified !== null ? (
+                        <span className="rounded bg-fail-soft px-2 py-0.5 text-[11px] font-bold text-fail">
+                          {person.disqualified}
+                        </span>
+                      ) : !person.metMinimum ? (
+                        <span className="rounded bg-hold-soft px-2 py-0.5 text-[11px] font-bold text-hold">
+                          too few checks
+                        </span>
+                      ) : (
+                        <span className="rounded bg-pass-soft px-2 py-0.5 text-[11px] font-bold text-pass">
+                          in the running
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
   );
 };
 
