@@ -54,6 +54,12 @@ export type Candidate = {
   clean: number;
   cleanPct: number;
   complaints: number;
+  /** Every vehicle they were inspected on this month. */
+  vehicles: string[];
+  /** Null when they are still in the running. */
+  disqualified: string | null;
+  /** True when they cleared the zone's inspection bar. */
+  metMinimum: boolean;
 };
 
 export type ZoneAward = {
@@ -63,6 +69,8 @@ export type ZoneAward = {
   minimum: number;
   winner: Candidate | null;
   runnersUp: Candidate[];
+  /** Everyone, ranked, including those ruled out and why. */
+  standings: Candidate[];
   /** Why there is no winner, when there isn't one. */
   note: string | null;
   excludedCount: number;
@@ -102,7 +110,7 @@ export const getDriverOfMonth = async (month: string): Promise<ZoneAward[]> => {
     }
   }
 
-  type Tally = Candidate & { zone: number; disqualified: string | null };
+  type Tally = Candidate & { zone: number };
   const people = new Map<string, Tally>();
 
   for (const record of records) {
@@ -120,6 +128,8 @@ export const getDriverOfMonth = async (month: string): Promise<ZoneAward[]> => {
       clean: 0,
       cleanPct: 0,
       complaints: complaintsByDriver.get(record.driverId) ?? 0,
+      vehicles: [],
+      metMinimum: false,
       zone,
       disqualified: null,
     };
@@ -127,6 +137,12 @@ export const getDriverOfMonth = async (month: string): Promise<ZoneAward[]> => {
     entry.inspections += 1;
     if (record.status === 'compliant') {
       entry.clean += 1;
+    }
+    // A plate correction, or a driver moved between vehicles, must not
+    // split their record. Grouping is by person; the vehicles are just
+    // listed.
+    if (!entry.vehicles.includes(record.plate)) {
+      entry.vehicles.push(record.plate);
     }
 
     // Two things rule someone out whatever their rate. A temperature
@@ -161,15 +177,31 @@ export const getDriverOfMonth = async (month: string): Promise<ZoneAward[]> => {
       (person) => person.disqualified !== null || person.inspections < minimum,
     );
 
+    const withRate = (person: Tally): Candidate => ({
+      ...person,
+      cleanPct: Math.round((person.clean / person.inspections) * 100),
+      metMinimum: person.inspections >= minimum,
+    });
+
     const eligible = standing
       .filter((person) => person.inspections >= minimum)
-      .map((person) => ({
-        ...person,
-        cleanPct: Math.round((person.clean / person.inspections) * 100),
-      }))
+      .map(withRate)
       .sort((a, b) =>
         b.cleanPct === a.cleanPct ? b.inspections - a.inspections : b.cleanPct - a.cleanPct,
       );
+
+    // Everyone, so the edge cases can be judged rather than hidden. In
+    // the running first, then the rest by how close they came.
+    const standings = inZone
+      .map(withRate)
+      .sort((a, b) => {
+        const aIn = a.disqualified === null && a.metMinimum;
+        const bIn = b.disqualified === null && b.metMinimum;
+        if (aIn !== bIn) {
+          return aIn ? -1 : 1;
+        }
+        return b.cleanPct === a.cleanPct ? b.inspections - a.inspections : b.cleanPct - a.cleanPct;
+      });
 
     return {
       zone,
@@ -177,6 +209,7 @@ export const getDriverOfMonth = async (month: string): Promise<ZoneAward[]> => {
       minimum,
       winner: eligible[0] ?? null,
       runnersUp: eligible.slice(1, 4),
+      standings,
       note:
         eligible.length > 0
           ? null
