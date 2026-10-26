@@ -561,7 +561,7 @@ const SlackPanel = ({
       type="button"
       onClick={slack.onSend}
       disabled={slack.sending || slack.sent || !declared}
-      className="mt-3 w-full rounded-xl bg-brand-action py-3.5 text-sm font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
+      className="mt-3 w-full rounded-full bg-brand-action py-4 text-sm font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
     >
       {slack.sent
         ? 'Report sent'
@@ -631,7 +631,7 @@ const AreaList = ({
             type="button"
             onClick={() => onPick(area)}
             disabled={vansHere === 0}
-            className="flex w-full items-center gap-3 rounded-xl border border-line bg-surface-card p-4 text-left active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100"
+            className="flex w-full items-center gap-3 rounded-2xl border border-line bg-surface-card p-4 text-left active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100"
           >
             <div
               className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-xs font-bold text-content-invert ${
@@ -816,7 +816,7 @@ const VanList = ({
         <button
           type="button"
           onClick={onReport}
-          className="w-full rounded-xl border border-line bg-surface-card py-3.5 text-sm font-bold text-brand"
+          className="w-full rounded-full border border-line bg-surface-card py-4 text-sm font-bold text-brand"
         >
           View shift report
         </button>
@@ -1058,7 +1058,7 @@ const Checklist = ({
                 : 'border-line';
 
           return (
-            <div key={item.code} className={`rounded-xl border-2 bg-surface-card p-4 ${border}`}>
+            <div key={item.code} className={`rounded-2xl border bg-surface-card p-4 ${border}`}>
               <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-content">
                 {item.label}
               </div>
@@ -1147,7 +1147,7 @@ const Checklist = ({
                         uploading: false,
                       })
                     }
-                    className={`flex-1 rounded-lg py-3 text-sm font-bold ${
+                    className={`flex-1 rounded-full py-3.5 text-sm font-bold ${
                       answer.passed === true ? 'bg-pass text-content-invert' : 'bg-pass-soft text-pass'
                     }`}
                   >
@@ -1156,7 +1156,7 @@ const Checklist = ({
                   <button
                     type="button"
                     onClick={() => onPatch(item.code, { passed: false })}
-                    className={`flex-1 rounded-lg py-3 text-sm font-bold ${
+                    className={`flex-1 rounded-full py-3.5 text-sm font-bold ${
                       answer.passed === false ? 'bg-fail text-content-invert' : 'bg-fail-soft text-fail'
                     }`}
                   >
@@ -1207,10 +1207,10 @@ const Checklist = ({
                   key={choice.value}
                   type="button"
                   onClick={() => onTraining(choice.value)}
-                  className={`rounded-lg px-3 py-2.5 text-sm font-bold ${
+                  className={`rounded-full px-4 py-2.5 text-sm font-bold ${
                     training === choice.value
-                      ? 'bg-brand-action text-content-invert'
-                      : 'border border-line bg-surface-page text-content-secondary'
+                      ? 'border border-brand bg-brand-light text-brand'
+                      : 'border border-line bg-surface-card text-content-secondary'
                   }`}
                 >
                   {choice.label}
@@ -1291,10 +1291,10 @@ const Evidence = ({
                 key={cause.id}
                 type="button"
                 onClick={() => onPatch(code, { causeId: cause.id })}
-                className={`rounded-lg px-3 py-2.5 text-left text-sm font-bold ${
+                className={`rounded-full px-4 py-2.5 text-left text-sm font-bold ${
                   answer.causeId === cause.id
-                    ? 'bg-brand-action text-content-invert'
-                    : 'border border-line bg-surface-page text-content-secondary'
+                    ? 'border border-brand bg-brand-light text-brand'
+                    : 'border border-line bg-surface-card text-content-secondary'
                 }`}
               >
                 {cause.label}
@@ -1323,8 +1323,8 @@ const Evidence = ({
                 }
                 className={`rounded-full px-3 py-2 text-xs font-bold ${
                   answer.actionId === action.id
-                    ? 'bg-brand-action text-content-invert'
-                    : 'border border-line bg-surface-page text-content-secondary'
+                    ? 'border border-brand bg-brand-light text-brand'
+                    : 'border border-line bg-surface-card text-content-secondary'
                 }`}
               >
                 {action.label}
