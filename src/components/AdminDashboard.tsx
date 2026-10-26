@@ -153,7 +153,7 @@ export const AdminDashboard = ({
             <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-content-invert-secondary">
               UAE · Manager view
             </div>
-            <h1 className="text-2xl font-black text-content-invert">Van check admin</h1>
+            <h1 className="text-3xl font-black tracking-tight text-content-invert">Van check admin</h1>
           </div>
           <a
             href="/"
@@ -447,7 +447,7 @@ const Reports = ({ areas }: { areas: Area[] }) => {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-md border border-line bg-surface-card p-4">
+      <div className="rounded-xl border border-line bg-surface-card p-4">
         <div className="flex flex-wrap gap-2">
           {PRESETS.map((option) => (
             <button
@@ -507,7 +507,7 @@ const Reports = ({ areas }: { areas: Area[] }) => {
 
           <a
             href={`/api/reports/pdf?${params()}`}
-            className="rounded-sm bg-brand-action px-5 py-2.5 text-sm font-bold text-content-invert"
+            className="rounded-full bg-brand-action px-6 py-2.5 text-sm font-bold text-content-invert"
           >
             Download PDF
           </a>
@@ -667,7 +667,7 @@ const Reports = ({ areas }: { areas: Area[] }) => {
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-md border border-line bg-surface-card">
+          <div className="overflow-x-auto rounded-xl border border-line bg-surface-card">
             <table className="w-full text-left text-sm">
               <thead className="border-b border-line text-[11px] uppercase tracking-wide text-content-secondary">
                 <tr>
@@ -787,7 +787,7 @@ const InspectionRow = ({ row }: { row: ReportRow }) => {
             {detail !== null && (
               <div className="space-y-4">
                 {detail.failures.map((failure) => (
-                  <div key={failure.label} className="rounded-md border border-line bg-surface-card p-4">
+                  <div key={failure.label} className="rounded-xl border border-line bg-surface-card p-4">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-bold text-content">
                         {failure.label}
@@ -834,7 +834,7 @@ const InspectionRow = ({ row }: { row: ReportRow }) => {
                 ))}
 
                 {detail.notes !== null && detail.notes !== '' && (
-                  <div className="rounded-md border border-line bg-surface-card p-4">
+                  <div className="rounded-xl border border-line bg-surface-card p-4">
                     <div className="text-[11px] font-bold uppercase tracking-wide text-content-secondary">
                       Inspector&rsquo;s notes
                     </div>
@@ -897,7 +897,7 @@ const Tile = ({
   const better = change === undefined ? false : rounded > 0 === change.riseIsGood;
 
   return (
-    <div className={`rounded-md border border-line p-4 ${meta.bg}`}>
+    <div className={`rounded-xl border border-line p-4 ${meta.bg}`}>
       <div className="text-[11px] font-bold uppercase tracking-wide text-content-secondary">
         {label}
       </div>
@@ -967,7 +967,7 @@ const FilterChip = ({
       ? 'bg-pass text-content-invert'
       : tone === 'fail'
         ? 'bg-fail text-content-invert'
-        : 'bg-brand-action text-content-invert';
+        : 'bg-brand-bold text-content-invert';
 
   return (
     <button
@@ -1000,7 +1000,7 @@ const OpenItemsPanel = ({ openItems }: { openItems: OpenItem[] }) => {
 
   if (openItems.length === 0) {
     return (
-      <div className="rounded-md border border-line bg-pass-soft p-4">
+      <div className="rounded-xl border border-line bg-pass-soft p-4">
         <p className="text-sm font-bold text-pass">Nothing outstanding</p>
         <p className="mt-0.5 text-xs text-content-secondary">
           Every failure recorded has since been passed on a later check.
@@ -1013,7 +1013,7 @@ const OpenItemsPanel = ({ openItems }: { openItems: OpenItem[] }) => {
   const oldest = openItems[0];
 
   return (
-    <div className="overflow-hidden rounded-md border border-line bg-surface-card">
+    <div className="overflow-hidden rounded-xl border border-line bg-surface-card">
       <button
         type="button"
         onClick={() => setOpen(!open)}
@@ -1177,7 +1177,7 @@ const ComplaintsLog = ({
   };
 
   return (
-    <div className="overflow-hidden rounded-md border border-line bg-surface-card">
+    <div className="overflow-hidden rounded-xl border border-line bg-surface-card">
       <button
         type="button"
         onClick={() => setOpen(!open)}
@@ -1219,7 +1219,7 @@ const ComplaintsLog = ({
 
             {mode === 'paste' && (
               <div className="mt-3 space-y-2">
-                <div className="rounded-sm border border-line bg-surface-card p-3 text-xs text-content-secondary">
+                <div className="rounded-lg border border-line bg-surface-card p-3 text-xs text-content-secondary">
                   <span className="font-mono font-bold text-content">
                     name, date, source, note
                   </span>
@@ -1236,7 +1236,7 @@ const ComplaintsLog = ({
                   }}
                   rows={5}
                   placeholder={`name,date,source,note\nSajid,30/09/2026,App review,Late and rude\nSultan,28/09/2026,CS ticket,`}
-                  className="w-full resize-y rounded-sm border border-line bg-surface-card p-3 font-mono text-xs text-content outline-none"
+                  className="w-full resize-y rounded-lg border border-line bg-surface-card p-3 font-mono text-xs text-content outline-none"
                 />
 
                 <input
@@ -1246,7 +1246,7 @@ const ComplaintsLog = ({
                     setPreview(null);
                   }}
                   placeholder="or paste a Google Sheet link"
-                  className="w-full rounded-sm border border-line bg-surface-card p-3 font-mono text-xs text-content outline-none"
+                  className="w-full rounded-lg border border-line bg-surface-card p-3 font-mono text-xs text-content outline-none"
                 />
 
                 <div className="flex flex-wrap items-center gap-3">
@@ -1254,7 +1254,7 @@ const ComplaintsLog = ({
                     type="button"
                     onClick={() => void check()}
                     disabled={busy || (text.trim() === '' && sheetUrl.trim() === '')}
-                    className="rounded-sm bg-brand-action px-5 py-2 text-xs font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
+                    className="rounded-full bg-brand-action px-5 py-2 text-xs font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
                   >
                     {busy ? 'Checking…' : 'Check the list'}
                   </button>
@@ -1264,7 +1264,7 @@ const ComplaintsLog = ({
                       type="button"
                       onClick={() => void commit()}
                       disabled={busy}
-                      className="rounded-sm bg-pass px-5 py-2 text-xs font-bold text-content-invert"
+                      className="rounded-full bg-pass px-5 py-2 text-xs font-bold text-content-invert"
                     >
                       Log {preview.valid.length} complaint
                       {preview.valid.length === 1 ? '' : 's'}
@@ -1338,7 +1338,7 @@ const ComplaintsLog = ({
               type="button"
               onClick={() => void add()}
               disabled={busy || driverId === ''}
-              className="rounded-sm bg-brand-action px-5 py-2.5 text-sm font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
+              className="rounded-full bg-brand-action px-6 py-2.5 text-sm font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
             >
               Log it
             </button>
@@ -1453,7 +1453,7 @@ const AwardsTab = ({ drivers }: { drivers: Driver[] }) => {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end gap-3 rounded-md border border-line bg-surface-card p-4">
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-line bg-surface-card p-4">
         <Field label="Month">
           <input
             type="month"
@@ -1477,7 +1477,7 @@ const AwardsTab = ({ drivers }: { drivers: Driver[] }) => {
         awards?.map((award) => (
           <div
             key={award.zone}
-            className="overflow-hidden rounded-md border border-line bg-surface-card"
+            className="overflow-hidden rounded-xl border border-line bg-surface-card"
           >
             <div className="border-b border-line px-4 py-3">
               <div className="text-sm font-bold text-content">{award.zoneName}</div>
@@ -1659,7 +1659,7 @@ const SearchBox = ({
       onChange={(event) => onChange(event.target.value)}
       placeholder={placeholder}
       aria-label={placeholder}
-      className="min-w-[220px] flex-1 rounded-sm border border-line bg-surface-card px-3 py-2.5 text-sm text-content outline-none focus:border-brand"
+      className="min-w-[220px] flex-1 rounded-lg border border-line bg-surface-card px-3 py-2.5 text-sm text-content outline-none focus:border-brand"
     />
     <span className="text-xs text-content-secondary">
       {value.trim() === '' ? `${total} total` : `${count} of ${total}`}
@@ -1855,7 +1855,7 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end gap-3 rounded-md border border-line bg-surface-card p-4">
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-line bg-surface-card p-4">
         <label className="text-xs font-bold uppercase tracking-wide text-content-secondary">
           Window
           <select
@@ -1889,7 +1889,7 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
       </div>
 
       {insight !== null && insight.systemic.length > 0 && (
-        <div className="rounded-md border border-line bg-hold-soft p-4">
+        <div className="rounded-xl border border-line bg-hold-soft p-4">
           <div className="text-sm font-bold text-hold">Not a training problem</div>
           <p className="mt-0.5 text-xs text-content-secondary">
             These affect several people and share a cause training cannot change.
@@ -1924,7 +1924,7 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
       {/* Grouped by what you would brief them on. A list of people is
           the wrong shape: nobody runs a session for one person and a
           cause code. */}
-      <div className="overflow-hidden rounded-md border border-line bg-surface-card">
+      <div className="overflow-hidden rounded-xl border border-line bg-surface-card">
         <div className="border-b border-line px-4 py-3">
           <div className="text-sm font-bold text-content">Sessions to run</div>
           <p className="mt-0.5 text-xs text-content-secondary">
@@ -1950,7 +1950,7 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
       </div>
 
       {insight !== null && insight.systemic.length > 0 && (
-        <div className="overflow-hidden rounded-md border border-line bg-surface-card">
+        <div className="overflow-hidden rounded-xl border border-line bg-surface-card">
           <div className="border-b border-line px-4 py-3">
             <div className="text-sm font-bold text-content">Not a training problem</div>
             <p className="mt-0.5 text-xs text-content-secondary">
@@ -1989,7 +1989,7 @@ const TrainingTab = ({ areas }: { areas: Area[] }) => {
             <button
               type="button"
               onClick={() => setShowWatch(!showWatch)}
-              className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-brand"
+              className="rounded-full border border-line px-4 py-1.5 text-xs font-bold text-brand"
             >
               {showWatch ? 'Hide' : 'Show'}
             </button>
@@ -2065,7 +2065,7 @@ const TopicPanel = ({
           type="button"
           disabled={saving || included.length === 0}
           onClick={() => onRecord(included.map((person) => person.personId))}
-          className="shrink-0 rounded-sm bg-pass px-4 py-2 text-xs font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
+          className="shrink-0 rounded-full bg-pass px-5 py-2 text-xs font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
         >
           {saving
             ? 'Recording…'
@@ -2146,7 +2146,7 @@ const ActionsPanel = ({
   };
 
   return (
-    <div className="rounded-md border border-line bg-surface-card p-4">
+    <div className="rounded-xl border border-line bg-surface-card p-4">
       <h2 className="text-sm font-bold text-content">What was done</h2>
       <p className="mt-0.5 text-xs text-content-secondary">
         One list for every check. Optional for the inspector, but it is what separates a van
@@ -2166,7 +2166,7 @@ const ActionsPanel = ({
           type="button"
           onClick={() => void add()}
           disabled={busy}
-          className="rounded-sm bg-brand-action px-5 py-2.5 text-sm font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
+          className="rounded-full bg-brand-action px-6 py-2.5 text-sm font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
         >
           Add
         </button>
@@ -2295,7 +2295,7 @@ const OptionsTab = ({
             type="button"
             onClick={() => void add()}
             disabled={busy}
-            className="rounded-sm bg-brand-action px-5 py-2.5 text-sm font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
+            className="rounded-full bg-brand-action px-6 py-2.5 text-sm font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
           >
             Add
           </button>
@@ -2319,7 +2319,7 @@ const OptionsTab = ({
           return null;
         }
         return (
-          <div key={item.id} className="overflow-hidden rounded-md border border-line bg-surface-card">
+          <div key={item.id} className="overflow-hidden rounded-xl border border-line bg-surface-card">
             <div className="border-b border-line px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-content-secondary">
               {item.label}
             </div>
@@ -2550,7 +2550,7 @@ const VansTab = ({
             type="button"
             onClick={() => void add()}
             disabled={busy}
-            className="rounded-sm bg-brand-action px-5 py-2.5 text-sm font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
+            className="rounded-full bg-brand-action px-6 py-2.5 text-sm font-bold text-content-invert disabled:bg-disabled disabled:text-content-secondary"
           >
             Add
           </button>
@@ -2565,7 +2565,7 @@ const VansTab = ({
         total={vans.length}
       />
 
-      <div className="overflow-hidden rounded-md border border-line bg-surface-card">
+      <div className="overflow-hidden rounded-xl border border-line bg-surface-card">
         {vans
           .filter((van) => matches(search, van.plate, areaName(van.areaId)))
           .map((van) => (
@@ -2657,7 +2657,7 @@ const VanRow = ({
             type="button"
             onClick={() => void save()}
             disabled={busy}
-            className="rounded-sm bg-brand-action px-5 py-2.5 text-sm font-bold text-content-invert"
+            className="rounded-full bg-brand-action px-6 py-2.5 text-sm font-bold text-content-invert"
           >
             Save
           </button>
@@ -2669,7 +2669,7 @@ const VanRow = ({
               setVehicleType(van.vehicleType);
               setEditing(false);
             }}
-            className="rounded-sm border border-line px-4 py-2.5 text-sm font-bold text-content-secondary"
+            className="rounded-full border border-line px-5 py-2.5 text-sm font-bold text-content-secondary"
           >
             Cancel
           </button>
@@ -2701,7 +2701,7 @@ const VanRow = ({
         <button
           type="button"
           onClick={() => setEditing(true)}
-          className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-brand"
+          className="rounded-full border border-line px-4 py-1.5 text-xs font-bold text-brand"
         >
           Edit
         </button>
@@ -3063,7 +3063,7 @@ const StaffRow = ({
             type="button"
             onClick={() => void save()}
             disabled={busy}
-            className="rounded-sm bg-brand-action px-5 py-2.5 text-sm font-bold text-content-invert"
+            className="rounded-full bg-brand-action px-6 py-2.5 text-sm font-bold text-content-invert"
           >
             Save
           </button>
@@ -3076,7 +3076,7 @@ const StaffRow = ({
               setPartnerId(person.partnerId ?? '');
               setEditing(false);
             }}
-            className="rounded-sm border border-line px-4 py-2.5 text-sm font-bold text-content-secondary"
+            className="rounded-full border border-line px-5 py-2.5 text-sm font-bold text-content-secondary"
           >
             Cancel
           </button>
@@ -3114,7 +3114,7 @@ const StaffRow = ({
         <button
           type="button"
           onClick={() => setEditing(true)}
-          className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-brand"
+          className="rounded-full border border-line px-4 py-1.5 text-xs font-bold text-brand"
         >
           Edit
         </button>
