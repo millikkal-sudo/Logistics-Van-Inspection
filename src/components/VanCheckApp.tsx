@@ -612,7 +612,21 @@ const AreaList = ({
   slack: SlackSend;
   canManage: boolean;
   onPick: (area: Area) => void;
-}) => (
+}) => {
+  // States the position before the list, the way the Calo home page
+  // leads with one line rather than opening on a grid. At 06:30 the
+  // useful question is what is left, not what exists.
+  const failures = today.filter((record) => record.status !== 'compliant').length;
+  const openHere = openItems.length;
+
+  const headline =
+    today.length === 0
+      ? 'Nothing checked yet.'
+      : failures === 0
+        ? 'Everything clear so far.'
+        : `${failures} vehicle${failures === 1 ? '' : 's'} to close out.`;
+
+  return (
   <div>
     <Header
       eyebrow={`${shiftLabel} shift · ${profile.fullName}`}
@@ -620,6 +634,19 @@ const AreaList = ({
       sub={`${today.length} checked across the UAE this shift`}
     />
     <div className="space-y-3 p-4">
+      <div className="rounded-2xl border border-line bg-surface-card p-4">
+        <p className="text-xl font-black leading-tight tracking-tight text-content">
+          {headline}
+        </p>
+        <p className="mt-1 text-xs text-content-secondary">
+          {today.length === 0
+            ? 'Pick an area below to start the round.'
+            : `${today.length - failures} of ${today.length} cleared this shift.`}
+          {openHere > 0 &&
+            ` ${openHere} item${openHere === 1 ? '' : 's'} still open from earlier rounds.`}
+        </p>
+      </div>
+
       {areas.map((area) => {
         const vansHere = fleet.filter((entry) => entry.areaId === area.id).length;
         const doneHere = today.filter((record) => record.areaName === area.name).length;
@@ -689,7 +716,8 @@ const AreaList = ({
       )}
     </div>
   </div>
-);
+  );
+};
 
 /* ----------------------------- van list ----------------------------- */
 
@@ -740,11 +768,19 @@ const VanList = ({
           } ${dimmed ? 'opacity-60' : ''}`}
         >
           <div
-            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-xs font-bold text-content-invert ${
-              done === undefined && !dimmed ? 'bg-brand' : 'bg-content-secondary'
+            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
+              done === undefined && !dimmed
+                ? 'bg-brand-light text-brand'
+                : 'bg-surface-page text-content-secondary'
             }`}
           >
-            {entry.plate.slice(-4)}
+            {entry.driverName
+              .trim()
+              .split(/\s+/)
+              .slice(0, 2)
+              .map((word) => word[0] ?? '')
+              .join('')
+              .toUpperCase() || '?'}
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-sm font-bold text-content">{entry.plate}</div>
