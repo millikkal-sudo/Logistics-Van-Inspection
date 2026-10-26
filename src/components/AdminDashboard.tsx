@@ -185,7 +185,7 @@ export const AdminDashboard = ({
         </nav>
       </header>
 
-      <div className="p-4 sm:p-6">
+      <div key={tab} className="screen p-4 sm:p-6">
         {notice !== null && (
           <div className="mb-4 flex items-start justify-between gap-3 rounded-lg bg-hold-soft p-4">
             <p className="text-sm font-medium leading-relaxed text-hold">{notice}</p>
@@ -216,10 +216,7 @@ export const AdminDashboard = ({
 
         {tab === 'reports' && (
           <>
-            <OpenItemsPanel openItems={openItems} />
-            <div className="mt-4">
-              <Reports areas={areas} />
-            </div>
+            <Reports areas={areas} openItems={openItems} onGo={setTab} />
           </>
         )}
 
@@ -265,6 +262,296 @@ export const AdminDashboard = ({
           />
         )}
       </div>
+    </div>
+  );
+};
+
+/* ---------------------------- narrative UI ---------------------------- */
+
+/**
+ * The headline figure as a ring.
+ *
+ * A percentage in a box is a fact. The same number as a filled ring is
+ * a judgement you can make at a glance from across a desk, which is how
+ * this screen actually gets read.
+ */
+const Ring = ({ value }: { value: number }) => (
+  <div
+    className="grid h-28 w-28 shrink-0 place-items-center rounded-full"
+    style={{
+      background: `conic-gradient(var(--brand-50) ${value}%, var(--base-30) 0)`,
+    }}
+  >
+    <span className="grid h-[88px] w-[88px] place-items-center rounded-full bg-surface-card text-2xl font-black text-content-contrast">
+      {value}%
+    </span>
+  </div>
+);
+
+/** Emoji, label, number, one line of context. Tappable. */
+const ExploreTile = ({
+  emoji,
+  label,
+  value,
+  caption,
+  tone = 'plain',
+  onClick,
+}: {
+  emoji: string;
+  label: string;
+  value: string;
+  caption: string;
+  tone?: 'plain' | 'alert' | 'good';
+  onClick: () => void;
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`flex min-h-[150px] flex-col gap-1.5 rounded-xl border p-4 text-left transition-colors active:scale-[0.98] ${
+      tone === 'alert'
+        ? 'border-fail-soft bg-fail-soft'
+        : tone === 'good'
+          ? 'border-brand-light bg-brand-light'
+          : 'border-line bg-surface-card hover:border-brand'
+    }`}
+  >
+    <span className="text-3xl leading-9">{emoji}</span>
+    <span className="text-xs text-content-secondary">{label}</span>
+    <span className="text-2xl font-bold text-content-contrast">{value}</span>
+    <span className="text-xs text-content-secondary">{caption}</span>
+  </button>
+);
+
+/** A row with an initial, a middle, and a chevron. */
+const Row = ({
+  avatar,
+  title,
+  sub,
+  detail,
+  tone,
+  onClick,
+}: {
+  avatar: string;
+  title: string;
+  sub: string;
+  detail?: string;
+  tone?: 'bad' | 'warn';
+  onClick?: () => void;
+}) => {
+  const body = (
+    <>
+      {tone === undefined ? (
+        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-brand-light text-sm font-bold text-brand">
+          {avatar}
+        </div>
+      ) : (
+        <span
+          className={`h-2.5 w-2.5 shrink-0 rounded-full ${tone === 'bad' ? 'bg-fail' : 'bg-hold'}`}
+        />
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-base font-bold text-content">{title}</div>
+        <div className="text-xs text-content-secondary">{sub}</div>
+        {detail !== undefined && (
+          <div className="mt-0.5 text-xs text-content-secondary">{detail}</div>
+        )}
+      </div>
+      {onClick !== undefined && <span className="shrink-0 text-xl text-content-tertiary">›</span>}
+    </>
+  );
+
+  const shell = 'flex min-h-16 w-full items-center gap-3.5 rounded-xl border border-line bg-surface-card px-4 py-3.5 text-left';
+
+  return onClick === undefined ? (
+    <div className={shell}>{body}</div>
+  ) : (
+    <button type="button" onClick={onClick} className={`${shell} hover:border-brand`}>
+      {body}
+    </button>
+  );
+};
+
+/** Big emoji, one line. Better than a blank panel. */
+const Empty = ({ emoji, children }: { emoji: string; children: React.ReactNode }) => (
+  <div className="px-5 py-10 text-center text-sm text-content-secondary">
+    <div className="text-5xl leading-[52px]">{emoji}</div>
+    <div className="mt-2">{children}</div>
+  </div>
+);
+
+const initials = (name: string): string =>
+  name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((word) => word[0] ?? '')
+    .join('')
+    .toUpperCase() || '?';
+
+/**
+ * The conclusion first, in a sentence, then the evidence.
+ *
+ * A grid of tiles makes a reader do the interpreting. Saying "every
+ * check proven" or "checks need more proof" does it for them, and the
+ * ring carries the number they would have looked for anyway.
+ */
+const Hero = ({
+  stats,
+  previous,
+  period,
+  openItems,
+}: {
+  stats: Stats;
+  previous: Stats;
+  period: string;
+  openItems: OpenItem[];
+}) => {
+  const hour = new Date(Date.now() + 4 * 60 * 60 * 1000).getUTCHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const delta = stats.compliancePct - previous.compliancePct;
+
+  if (stats.checks === 0) {
+    return (
+      <div>
+        <p className="text-sm text-content-secondary">{greeting}</p>
+        <h1 className="mt-1 text-4xl font-black leading-[44px] text-content-contrast">
+          No checks in this period.
+        </h1>
+        <p className="mt-2 text-base text-content-secondary">
+          Rounds filed by a supervisor show up here within seconds.
+        </p>
+      </div>
+    );
+  }
+
+  const headline =
+    stats.compliancePct === 100
+      ? 'Every vehicle <em>cleared</em>.'
+      : stats.compliancePct >= 90
+        ? 'Nearly every vehicle <em>cleared</em>.'
+        : stats.compliancePct >= 70
+          ? 'Some vehicles went out <em>with faults</em>.'
+          : 'Too many vehicles went out <em>with faults</em>.';
+
+  return (
+    <div>
+      <p className="text-sm text-content-secondary">{greeting}</p>
+      <div className="mt-2 flex flex-wrap items-center gap-5">
+        <Ring value={stats.compliancePct} />
+        <div className="min-w-[260px] flex-1">
+          <h1
+            className="text-3xl font-black leading-10 text-content-contrast [&_em]:not-italic [&_em]:text-brand"
+            dangerouslySetInnerHTML={{ __html: headline }}
+          />
+          <p className="mt-2 text-base text-content-secondary">
+            {stats.cleared} of {stats.checks} check{stats.checks === 1 ? '' : 's'} passed every
+            point, across {stats.vansCovered} vehicle{stats.vansCovered === 1 ? '' : 's'}.
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {Math.round(delta) === 0 ? (
+              <span className="rounded-full bg-surface-page px-2.5 py-1 text-xs font-bold text-content-secondary">
+                same as {period}
+              </span>
+            ) : (
+              <span
+                className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                  delta > 0 ? 'bg-pass-soft text-pass' : 'bg-fail-soft text-fail'
+                }`}
+              >
+                {delta > 0 ? '▲' : '▼'} {Math.abs(Math.round(delta))} points
+              </span>
+            )}
+            <span className="text-xs text-content-secondary">vs {period}</span>
+            {openItems.length > 0 && (
+              <span className="rounded-full bg-hold-soft px-2.5 py-1 text-xs font-bold text-hold">
+                {openItems.length} still open
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+type NeedsItem = { tone: 'bad' | 'warn'; title: string; sub: string; owner: string };
+
+/**
+ * Everything waiting on a person, with the person named.
+ *
+ * An item with no owner is a fact nobody acts on. The owner line is the
+ * difference between a dashboard that reports and one that moves work.
+ */
+const buildNeeds = (openItems: OpenItem[], records: ReportRow[]): NeedsItem[] => {
+  const items: NeedsItem[] = [];
+
+  for (const item of openItems.filter((entry) => entry.daysOpen >= 3)) {
+    items.push({
+      tone: 'bad',
+      title: `${item.plate} · ${item.checkLabel}`,
+      sub: `Open ${item.daysOpen} days${item.causeLabel === null ? '' : `, ${item.causeLabel.toLowerCase()}`}`,
+      owner: item.actionLabel === 'Reported to workshop' ? 'Workshop' : item.driverName,
+    });
+  }
+
+  for (const item of openItems.filter((entry) => entry.daysOpen < 3)) {
+    items.push({
+      tone: 'warn',
+      title: `${item.plate} · ${item.checkLabel}`,
+      sub: item.daysOpen === 0 ? 'Opened today' : `Open ${item.daysOpen} days`,
+      owner: item.driverName,
+    });
+  }
+
+  const flagged = records.filter((row) => row.status !== 'compliant' && row.failedCount > 1);
+  for (const row of flagged.slice(0, 3)) {
+    items.push({
+      tone: 'warn',
+      title: `${row.plate} · ${row.failedCount} failures in one check`,
+      sub: `${row.areaName}, ${new Date(row.performedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`,
+      owner: row.driverName,
+    });
+  }
+
+  return items;
+};
+
+const NeedsYou = ({ items }: { items: NeedsItem[] }) => {
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? items : items.slice(0, 3);
+
+  if (items.length === 0) {
+    return (
+      <div className="rounded-xl bg-pass-soft p-4 text-sm font-medium text-pass">
+        🎉 All clear. Nothing needs you right now.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl bg-surface-page p-4">
+      <div className="space-y-2.5">
+        {visible.map((item) => (
+          <Row
+            key={`${item.title}-${item.sub}`}
+            avatar=""
+            tone={item.tone}
+            title={item.title}
+            sub={item.sub}
+            detail={`Owner: ${item.owner}`}
+          />
+        ))}
+      </div>
+
+      {items.length > 3 && (
+        <button
+          type="button"
+          onClick={() => setShowAll(!showAll)}
+          className="mt-3 inline-flex min-h-10 items-center rounded-full bg-brand-light px-4 text-sm font-bold text-brand"
+        >
+          {showAll ? 'Show fewer' : `See all ${items.length}`}
+        </button>
+      )}
     </div>
   );
 };
@@ -380,7 +667,15 @@ const PRESETS: { key: PresetKey; label: string }[] = [
   { key: 'custom', label: 'Custom' },
 ];
 
-const Reports = ({ areas }: { areas: Area[] }) => {
+const Reports = ({
+  areas,
+  openItems,
+  onGo,
+}: {
+  areas: Area[];
+  openItems: OpenItem[];
+  onGo: (tab: Tab) => void;
+}) => {
   const initial = resolvePreset('week') ?? { from: iso(new Date()), to: iso(new Date()) };
 
   const [preset, setPreset] = useState<PresetKey>('week');
@@ -548,71 +843,94 @@ const Reports = ({ areas }: { areas: Area[] }) => {
           ...new Set<string>(data.records.map((row) => row.areaName)),
         ].sort();
         const failedCount = data.records.filter((row) => row.status !== 'compliant').length;
+        const needsItems = buildNeeds(openItems, data.records);
 
         return (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Tile
-              label="Vehicles checked"
-              value={String(data.stats.vansCovered)}
-              caption={`${data.stats.checks} check${data.stats.checks === 1 ? '' : 's'} on ${data.stats.vansCovered} vehicle${data.stats.vansCovered === 1 ? '' : 's'}`}
-              change={{
-                amount: data.stats.vansCovered - data.previous.vansCovered,
-                unit: 'vehicles',
-                riseIsGood: true,
-                period: periodLabel,
-              }}
-              tone="plain"
-            />
-            <Tile
-              label="Compliance"
-              value={`${data.stats.compliancePct}%`}
-              caption={`${data.stats.cleared} of ${data.stats.checks} checks passed`}
-              change={{
-                amount: data.stats.compliancePct - data.previous.compliancePct,
-                unit: 'points',
-                riseIsGood: true,
-                period: periodLabel,
-              }}
-              tone={
-                data.stats.compliancePct >= 90
-                  ? 'pass'
-                  : data.stats.compliancePct >= 70
-                    ? 'hold'
-                    : 'fail'
-              }
-            />
-            <Tile
-              label="Non-compliant"
-              value={String(data.stats.nonCompliant)}
-              caption={`check${data.stats.nonCompliant === 1 ? '' : 's'} failed`}
-              change={{
-                amount: data.stats.nonCompliant - data.previous.nonCompliant,
-                unit: 'failures',
-                // Fewer failures is the good direction. Treating a rise
-                // as positive is what made the arrow read backwards.
-                riseIsGood: false,
-                period: periodLabel,
-              }}
-              tone={data.stats.nonCompliant === 0 ? 'pass' : 'fail'}
-            />
-            <Tile
-              label="Highest temperature"
-              value={
-                data.stats.worstTempC === null ? '—' : `${data.stats.worstTempC.toFixed(1)}°C`
-              }
-              caption={
-                data.stats.worstTempC === null
-                  ? 'no readings in this period'
-                  : data.stats.worstTempC > 5
-                    ? `${(data.stats.worstTempC - 5).toFixed(1)}°C above the 5°C limit`
-                    : 'within the 0 to 5°C limit'
-              }
-              tone={
-                data.stats.worstTempC === null || data.stats.worstTempC <= 5 ? 'pass' : 'fail'
-              }
-            />
+          <Hero
+            stats={data.stats}
+            previous={data.previous}
+            period={periodLabel}
+            openItems={openItems}
+          />
+
+          <div>
+            <h2 className="mb-3 mt-6 text-2xl font-bold text-content-contrast">
+              Needs you{' '}
+              {needsItems.length > 0 && (
+                <span className="align-middle rounded-full bg-fail-soft px-2.5 py-1 text-xs font-bold text-fail">
+                  {needsItems.length}
+                </span>
+              )}
+            </h2>
+            <NeedsYou items={needsItems} />
           </div>
+
+          <div>
+            <h2 className="mb-3 mt-6 text-2xl font-bold text-content-contrast">Explore</h2>
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+              <ExploreTile
+                emoji="🚐"
+                label="Vehicles checked"
+                value={String(data.stats.vansCovered)}
+                caption={`${data.stats.checks} check${data.stats.checks === 1 ? '' : 's'} filed`}
+                onClick={() => onGo('vans')}
+              />
+              <ExploreTile
+                emoji={data.stats.nonCompliant === 0 ? '✅' : '⚠️'}
+                label="Non-compliant"
+                value={String(data.stats.nonCompliant)}
+                caption={
+                  data.stats.nonCompliant === 0 ? 'nothing to close out' : 'failures to close out'
+                }
+                tone={data.stats.nonCompliant === 0 ? 'good' : 'alert'}
+                onClick={() => setStatusFilter('noncompliant')}
+              />
+              <ExploreTile
+                emoji="🧊"
+                label="Highest temperature"
+                value={
+                  data.stats.worstTempC === null
+                    ? '—'
+                    : `${data.stats.worstTempC.toFixed(1)}°C`
+                }
+                caption={
+                  data.stats.worstTempC === null
+                    ? 'no readings'
+                    : data.stats.worstTempC > 5
+                      ? `${(data.stats.worstTempC - 5).toFixed(1)}°C over the limit`
+                      : 'within 0 to 5°C'
+                }
+                tone={
+                  data.stats.worstTempC !== null && data.stats.worstTempC > 5 ? 'alert' : 'good'
+                }
+                onClick={() => setStatusFilter('noncompliant')}
+              />
+              <ExploreTile
+                emoji="🎓"
+                label="Training"
+                value="Queue"
+                caption="who needs a session"
+                onClick={() => onGo('training')}
+              />
+              <ExploreTile
+                emoji="🏅"
+                label="Driver of the month"
+                value="Awards"
+                caption="three zones, two criteria"
+                onClick={() => onGo('awards')}
+              />
+              <ExploreTile
+                emoji="📄"
+                label="Audit pack"
+                value="PDF"
+                caption="photographs embedded"
+                onClick={() => window.open(`/api/reports/pdf?${params()}`, '_blank')}
+              />
+            </div>
+          </div>
+
+          <h2 className="mb-3 mt-6 text-2xl font-bold text-content-contrast">Every check</h2>
 
           <div className="space-y-3">
             <SearchBox
@@ -697,6 +1015,178 @@ const Reports = ({ areas }: { areas: Area[] }) => {
         </>
         );
       })()}
+    </div>
+  );
+};
+
+/**
+ * The opening read.
+ *
+ * A dashboard that opens on a table makes you work out the position
+ * yourself. This says it in a sentence, puts the one thing that needs a
+ * person next, and makes everything else a door rather than a tab you
+ * have to know about.
+ */
+const Overview = ({
+  data,
+  openItems,
+  periodLabel,
+  onGo,
+}: {
+  data: ReportPayload;
+  openItems: OpenItem[];
+  periodLabel: string;
+  onGo: (tab: Tab) => void;
+}) => {
+  const pct = data.stats.compliancePct;
+  const stale = openItems.filter((item) => item.daysOpen >= 3);
+  const hotTemp = data.stats.worstTempC !== null && data.stats.worstTempC > 5;
+
+  const hour = new Date(Date.now() + 4 * 60 * 60 * 1000).getUTCHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+
+  // The headline states the position rather than labelling the number.
+  const headline =
+    data.stats.checks === 0
+      ? 'No checks recorded yet.'
+      : pct === 100
+        ? 'Every vehicle cleared.'
+        : pct >= 90
+          ? 'Nearly every vehicle cleared.'
+          : pct >= 70
+            ? 'Some vehicles need a look.'
+            : 'Compliance needs attention.';
+
+  const ringTone = pct >= 90 ? '' : pct >= 70 ? 'warn' : 'bad';
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="text-sm text-content-secondary">{greeting}, Aflah</p>
+
+        <div className="mt-2 flex flex-wrap items-center gap-6">
+          <div className="ring" style={{ ['--p' as string]: pct } as React.CSSProperties}>
+            <span className={ringTone === '' ? 'text-pass' : ''}>{pct}%</span>
+          </div>
+
+          <div className="min-w-[240px] flex-1">
+            <h2 className="text-3xl font-black leading-tight tracking-tight text-content">
+              {headline}
+            </h2>
+            <p className="mt-2 text-sm text-content-secondary">
+              {data.stats.cleared} of {data.stats.checks} check
+              {data.stats.checks === 1 ? '' : 's'} passed {periodLabel === 'yesterday' ? 'today' : 'this period'}, across{' '}
+              {data.stats.vansCovered} vehicle{data.stats.vansCovered === 1 ? '' : 's'}.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {(stale.length > 0 || hotTemp) && (
+        <div>
+          <h3 className="mb-3 text-xl font-bold text-content">Needs you</h3>
+          <div className="space-y-2">
+            {hotTemp && (
+              <div className="item">
+                <span className="dot bad" />
+                <div className="main">
+                  <div className="text-sm font-bold text-content">
+                    A vehicle read {data.stats.worstTempC?.toFixed(1)}&deg;C
+                  </div>
+                  <div className="text-xs text-content-secondary">
+                    {((data.stats.worstTempC ?? 0) - 5).toFixed(1)}&deg;C above the limit. Worth
+                    knowing whether the unit failed or the reading was taken too early.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {stale.length > 0 && (
+              <button type="button" onClick={() => onGo('reports')} className="item">
+                <span className="dot warn" />
+                <div className="main">
+                  <div className="text-sm font-bold text-content">
+                    {stale.length} failure{stale.length === 1 ? '' : 's'} open 3 days or more
+                  </div>
+                  <div className="text-xs text-content-secondary">
+                    Oldest is {openItems[0]?.plate} at {openItems[0]?.daysOpen} days.
+                  </div>
+                </div>
+                <span className="chev">&rsaquo;</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <h3 className="mb-3 text-xl font-bold text-content">Explore</h3>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <button
+            type="button"
+            onClick={() => onGo('reports')}
+            className={`tile ${data.stats.nonCompliant > 0 ? 'alert' : 'good'}`}
+          >
+            <span className="emo">&#128203;</span>
+            <span className="text-xs text-content-secondary">Non-compliant</span>
+            <b>{data.stats.nonCompliant}</b>
+            <span className="text-xs text-content-secondary">
+              {data.stats.nonCompliant === 0 ? 'nothing to close out' : 'failures to close out'}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onGo('reports')}
+            className={`tile ${openItems.length > 0 ? 'alert' : 'good'}`}
+          >
+            <span className="emo">&#128275;</span>
+            <span className="text-xs text-content-secondary">Open items</span>
+            <b>{openItems.length}</b>
+            <span className="text-xs text-content-secondary">
+              {openItems.length === 0
+                ? 'everything cleared'
+                : `oldest ${openItems[0]?.daysOpen ?? 0} days`}
+            </span>
+          </button>
+
+          <button type="button" onClick={() => onGo('training')} className="tile">
+            <span className="emo">&#127891;</span>
+            <span className="text-xs text-content-secondary">Training</span>
+            <b>&rsaquo;</b>
+            <span className="text-xs text-content-secondary">sessions worth running</span>
+          </button>
+
+          <button type="button" onClick={() => onGo('awards')} className="tile">
+            <span className="emo">&#11088;</span>
+            <span className="text-xs text-content-secondary">Driver of the month</span>
+            <b>&rsaquo;</b>
+            <span className="text-xs text-content-secondary">three zones</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onGo('reports')}
+            className={`tile ${hotTemp ? 'alert' : 'good'}`}
+          >
+            <span className="emo">&#127777;</span>
+            <span className="text-xs text-content-secondary">Highest temperature</span>
+            <b>
+              {data.stats.worstTempC === null ? '\u2014' : `${data.stats.worstTempC.toFixed(1)}\u00b0`}
+            </b>
+            <span className="text-xs text-content-secondary">
+              {hotTemp ? 'above the 5 degree limit' : 'within range'}
+            </span>
+          </button>
+
+          <button type="button" onClick={() => onGo('vans')} className="tile">
+            <span className="emo">&#128667;</span>
+            <span className="text-xs text-content-secondary">Fleet</span>
+            <b>{data.stats.vansCovered}</b>
+            <span className="text-xs text-content-secondary">checked this period</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
@@ -985,93 +1475,6 @@ const FilterChip = ({
         </span>
       )}
     </button>
-  );
-};
-
-/**
- * Failures nobody has cleared.
- *
- * The number that matters is how long they stay open. Held Tuesday and
- * cleared Wednesday is a working process; open for eleven days is not,
- * and until now nothing in the system could tell the two apart.
- */
-const OpenItemsPanel = ({ openItems }: { openItems: OpenItem[] }) => {
-  const [open, setOpen] = useState(false);
-
-  if (openItems.length === 0) {
-    return (
-      <div className="rounded-xl border border-line bg-pass-soft p-4">
-        <p className="text-sm font-bold text-pass">Nothing outstanding</p>
-        <p className="mt-0.5 text-xs text-content-secondary">
-          Every failure recorded has since been passed on a later check.
-        </p>
-      </div>
-    );
-  }
-
-  const stale = openItems.filter((item) => item.daysOpen >= 3);
-  const oldest = openItems[0];
-
-  return (
-    <div className="overflow-hidden rounded-xl border border-line bg-surface-card">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-      >
-        <div>
-          <div className="text-sm font-bold text-content">
-            {openItems.length} open item{openItems.length === 1 ? '' : 's'}
-          </div>
-          <p className="mt-0.5 text-xs text-content-secondary">
-            Failures not yet passed on a later check
-            {stale.length > 0 && (
-              <span className="font-bold text-hold">
-                {' '}
-                · {stale.length} open 3 days or more
-              </span>
-            )}
-            {oldest !== undefined && `, oldest ${oldest.daysOpen} days`}
-          </p>
-        </div>
-        <span className="shrink-0 text-xs font-bold text-brand">{open ? 'Hide' : 'Show'}</span>
-      </button>
-
-      {open && (
-        <div className="border-t border-line">
-          {openItems.map((item) => (
-            <div
-              key={`${item.vanId}-${item.checkItemId}`}
-              className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-4 py-2.5 last:border-b-0"
-            >
-              <span
-                className={`w-14 shrink-0 text-xs font-bold ${
-                  item.daysOpen >= 3 ? 'text-fail' : 'text-content-secondary'
-                }`}
-              >
-                {item.daysOpen === 0 ? 'today' : `${item.daysOpen}d`}
-              </span>
-              <span className="text-sm font-bold text-content">{item.plate}</span>
-              <span className="text-xs text-content-secondary">
-                {item.areaName} · {item.driverName}
-              </span>
-              <span className="ml-auto text-xs text-content">
-                {item.checkLabel}
-                {item.causeLabel === null ? '' : `, ${item.causeLabel.toLowerCase()}`}
-              </span>
-              {item.actionLabel !== null && (
-                <span className="rounded bg-surface-page px-2 py-0.5 text-[11px] text-content-secondary">
-                  {item.actionLabel}
-                </span>
-              )}
-            </div>
-          ))}
-          <p className="px-4 py-2 text-[11px] text-content-secondary">
-            An item closes when the same vehicle passes the same check again. Nothing to mark off.
-          </p>
-        </div>
-      )}
-    </div>
   );
 };
 
