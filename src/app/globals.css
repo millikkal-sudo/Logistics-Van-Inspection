@@ -120,3 +120,233 @@ body {
     animation-duration: 0.01ms !important;
   }
 }
+
+/* ---------------------------------------------------------------------
+   Healthy UI patterns, shared by the supervisor app and the dashboard.
+
+   The thing that makes calo.app feel like Calo is not the green, it is
+   the shapes: pill actions, a progress ring instead of a bare figure,
+   tiles you can press, and generous radius. Expressed as classes rather
+   than repeated utility strings so both surfaces stay in step.
+   --------------------------------------------------------------------- */
+
+/* A figure worth looking at, drawn rather than printed. */
+.ring {
+  --p: 0;
+  flex: none;
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  background: conic-gradient(var(--brand-50) calc(var(--p) * 1%), var(--base-30) 0);
+  display: grid;
+  place-items: center;
+}
+
+.ring span {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: var(--base-0);
+  display: grid;
+  place-items: center;
+  font-weight: 900;
+  font-size: 26px;
+  line-height: 30px;
+  color: var(--base-90);
+}
+
+.ring.warn {
+  background: conic-gradient(var(--system-warning-2) calc(var(--p) * 1%), var(--base-30) 0);
+}
+
+.ring.bad {
+  background: conic-gradient(var(--system-error-2) calc(var(--p) * 1%), var(--base-30) 0);
+}
+
+/* A tile is a door, so it has to look pressable. */
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 150px;
+  padding: 18px;
+  border-radius: 12px;
+  border: 1px solid var(--base-40);
+  background: var(--base-0);
+  text-align: left;
+  transition:
+    transform 0.12s,
+    border-color 0.12s;
+}
+
+.tile:hover {
+  border-color: var(--brand-60);
+}
+
+.tile:active {
+  transform: scale(0.98);
+}
+
+.tile .emo {
+  font-size: 30px;
+  line-height: 36px;
+}
+
+.tile b {
+  font-weight: 700;
+  font-size: 24px;
+  line-height: 32px;
+  color: var(--base-90);
+}
+
+.tile.alert {
+  background: var(--system-error-1);
+  border-color: var(--system-error-1);
+}
+
+.tile.good {
+  background: var(--brand-5);
+  border-color: var(--brand-10);
+}
+
+/* A row that is tappable all the way across, thumb sized. */
+.item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 64px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--base-40);
+  background: var(--base-0);
+  text-align: left;
+}
+
+button.item:hover {
+  border-color: var(--brand-60);
+}
+
+.item .main {
+  flex: 1;
+  min-width: 0;
+}
+
+.item .chev {
+  flex: none;
+  font-size: 22px;
+  color: var(--base-50);
+}
+
+.av {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 14px;
+  background: var(--brand-5);
+  color: var(--brand-70);
+}
+
+.av.lg {
+  width: 64px;
+  height: 64px;
+  font-size: 20px;
+}
+
+.dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--brand-50);
+}
+
+.dot.warn {
+  background: var(--system-warning-2);
+}
+
+.dot.bad {
+  background: var(--system-error-2);
+}
+
+.stat {
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--base-20);
+}
+
+.stat small {
+  display: block;
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--base-70);
+}
+
+.stat b {
+  display: block;
+  font-weight: 700;
+  font-size: 24px;
+  line-height: 32px;
+  color: var(--base-90);
+  margin-top: 4px;
+}
+
+.stat em {
+  display: block;
+  font-style: normal;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--base-70);
+  margin-top: 4px;
+}
+
+/* A loading state that holds the layout, rather than a spinner that
+   throws it away and makes the page jump when data lands. */
+.skel {
+  height: 120px;
+  border-radius: 12px;
+  background: linear-gradient(90deg, var(--base-20), var(--base-30), var(--base-20));
+  background-size: 200% 100%;
+  animation: shimmer 1.2s infinite;
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.screen {
+  animation: slide-in 0.22s ease-out;
+}
+
+.screen.backwards {
+  animation: slide-back 0.22s ease-out;
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes slide-back {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
