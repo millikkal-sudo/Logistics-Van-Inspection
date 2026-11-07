@@ -9,6 +9,7 @@ import {
   resolveStatus,
   type Area,
   type CheckAnswer,
+  type Driver,
   type CheckAction,
   type CheckCause,
   type CheckItem,
@@ -81,6 +82,13 @@ type Props = {
   initialToday: InspectionSummary[];
   /** Failures not yet passed again. Shown before she starts, not after. */
   openItems: OpenItem[];
+  /**
+   * Anyone still working through onboarding, with where they are. A
+   * note for the inspector, never a block.
+   */
+  onboarding: { name: string; status: string }[];
+  /** Everyone on the system, for recording who is actually on a van. */
+  people: Driver[];
   /** "Morning", "Evening", "Early morning". Resolved from the clock. */
   shiftLabel: string;
   canManage: boolean;
@@ -95,6 +103,8 @@ export const VanCheckApp = ({
   actions,
   initialToday,
   openItems,
+  onboarding,
+  people,
   shiftLabel,
   canManage,
 }: Props) => {
@@ -108,6 +118,17 @@ export const VanCheckApp = ({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState('');
+
+  /**
+   * Who is actually on the van right now.
+   *
+   * Starts from the standing assignment and can be changed without
+   * touching it. The inspector cannot know whether a swap is cover for
+   * a sick day or a permanent handover, and should not have to: she
+   * records who is there, and the dashboard works out what it means
+   * once a pattern exists.
+   */
+  const [crew, setCrew] = useState<{ driverId: string; helperId: string | null } | null>(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [sendNote, setSendNote] = useState('');
@@ -232,6 +253,7 @@ export const VanCheckApp = ({
     setNotes('');
     setTraining('none');
     setError(null);
+    setCrew(null);
     // A new check means the round has moved on, so the report can be
     // sent again rather than staying stuck on "Report sent".
     setSent(false);
@@ -278,8 +300,8 @@ export const VanCheckApp = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           vanId: van.vanId,
-          driverId: van.driverId,
-          helperId: van.helperId ?? undefined,
+          driverId: crew?.driverId ?? van.driverId,
+          helperId: (crew === null ? van.helperId : crew.helperId) ?? undefined,
           areaId: area?.id,
           notes: notes.trim() === '' ? undefined : notes.trim(),
           trainingFlag: training,
@@ -297,6 +319,19 @@ export const VanCheckApp = ({
       }
 
       const status = resolveStatus(payload);
+
+      // The names behind the chosen ids, for the row that appears
+      // immediately rather than after a refresh.
+      const chosenDriver = people.find((person) => person.id === (crew?.driverId ?? van.driverId));
+      const chosenHelperId = crew === null ? van.helperId : crew.helperId;
+      const crewNames = {
+        driverName: chosenDriver?.fullName ?? van.driverName,
+        helperName:
+          chosenHelperId === null
+            ? null
+            : (people.find((person) => person.id === chosenHelperId)?.fullName ??
+              van.helperName),
+      };
       const time = clockTime();
 
       setOutcome({
@@ -313,16 +348,16 @@ export const VanCheckApp = ({
           plate: van.plate,
           vehicleType: van.vehicleType,
           areaName: area?.name ?? 'Unassigned',
-          driverName: van.driverName,
-          helperName: van.helperName,
+          driverName: crewNames.driverName,
+          helperName: crewNames.helperName,
           inspectorName: profile.fullName,
           status,
           dispatchBlocked: false,
           failedCount: failures.length,
           tempReadingC: tempValue,
           notes: notes.trim() === '' ? null : notes.trim(),
-          driverId: van.driverId,
-          helperId: van.helperId,
+          driverId: crew?.driverId ?? van.driverId,
+          helperId: crew === null ? van.helperId : crew.helperId,
           trainingFlag: training,
         },
       ]);
@@ -362,6 +397,7 @@ export const VanCheckApp = ({
             area={area}
             fleet={fleet.filter((entry) => entry.areaId === area.id)}
             openItems={openItems}
+            onboarding={onboarding}
             checkedPlates={checkedPlates}
             query={query}
             onQuery={setQuery}
@@ -405,6 +441,9 @@ export const VanCheckApp = ({
             onSubmit={() => void submit()}
             onError={setError}
             openItems={openItems.filter((item) => item.vanId === van.vanId)}
+            people={people}
+            crew={crew}
+            onCrew={setCrew}
             onCorrected={(plate, driverName) =>
               setVan((current) =>
                 current === null ? null : { ...current, plate, driverName },
@@ -726,6 +765,7 @@ const VanList = ({
   area,
   fleet,
   openItems,
+  onboarding,
   checkedPlates,
   query,
   onQuery,
@@ -737,6 +777,7 @@ const VanList = ({
   area: Area;
   fleet: FleetEntry[];
   openItems: OpenItem[];
+  onboarding: { name: string; status: string }[];
   checkedPlates: Map<string, InspectionStatus>;
   query: string;
   onQuery: (value: string) => void;
@@ -755,6 +796,13 @@ const VanList = ({
   const row = (entry: FleetEntry, dimmed: boolean): React.ReactNode => {
     const done = checkedPlates.get(entry.plate);
     const open = openItems.filter((item) => item.vanId === entry.vanId);
+    // Where this crew is in onboarding, if they are still in it. Day 3
+    // of 7 on the fleet is expected and fine; the inspector just needs
+    // to know who she is talking to.
+    const inTraining = [entry.driverName, entry.helperName].flatMap((name) => {
+      const match = onboarding.find((person) => person.name === name);
+      return match === undefined ? [] : [`${match.name}: ${match.status.toLowerCase()}`];
+    });
     return (
       <div key={entry.vanId}>
         <button
@@ -788,6 +836,11 @@ const VanList = ({
               {entry.driverName}
               {entry.helperName === null ? '' : ` + ${entry.helperName}`}
             </div>
+            {inTraining.length > 0 && done === undefined && (
+              <div className="truncate text-xs font-bold text-hold">
+                {inTraining.join(' · ')}
+              </div>
+            )}
             {open.length > 0 && done === undefined && (
               <div className="truncate text-xs font-bold text-hold">
                 Open: {open.map((item) => item.causeLabel ?? item.checkLabel).join(', ')} ·{' '}
@@ -862,6 +915,137 @@ const VanList = ({
 };
 
 /* ----------------------------- checklist ----------------------------- */
+
+/**
+ * Who is actually on this van today.
+ *
+ * Picked from people already on the system, never typed: a free text
+ * field is how the same person ends up on the books twice, and how a
+ * rename quietly overwrites someone else's record.
+ *
+ * Changing it here records the inspection against the right people and
+ * leaves the standing assignment alone. The inspector cannot know
+ * whether a swap is a sick day or a handover, so she is not asked.
+ */
+const CrewPicker = ({
+  van,
+  people,
+  crew,
+  onChange,
+}: {
+  van: FleetEntry;
+  people: Driver[];
+  crew: { driverId: string; helperId: string | null } | null;
+  onChange: (next: { driverId: string; helperId: string | null } | null) => void;
+}) => {
+  const [open, setOpen] = useState(false);
+
+  const driverId = crew?.driverId ?? van.driverId;
+  const helperId = crew === null ? van.helperId : crew.helperId;
+
+  const inArea = people.filter((person) => person.active && person.areaId === van.areaId);
+  const drivers = inArea.filter((person) => person.staffRole === 'driver');
+  const helpers = inArea.filter((person) => person.staffRole === 'helper');
+
+  const changed =
+    crew !== null && (crew.driverId !== van.driverId || crew.helperId !== van.helperId);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-2 text-xs font-bold text-content-invert-secondary underline"
+      >
+        {changed ? 'Crew changed for this check' : 'Someone else on this van?'}
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-3 rounded-lg bg-invert-subtle p-3">
+      <div>
+        <div className="text-[11px] font-bold uppercase tracking-wide text-content-invert-secondary">
+          Driver
+        </div>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {drivers.map((person) => (
+            <button
+              key={person.id}
+              type="button"
+              onClick={() => onChange({ driverId: person.id, helperId })}
+              className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                person.id === driverId
+                  ? 'bg-surface-card text-brand'
+                  : 'bg-invert-subtle text-content-invert-secondary'
+              }`}
+            >
+              {person.fullName}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="text-[11px] font-bold uppercase tracking-wide text-content-invert-secondary">
+          Helper
+        </div>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {/* A first class option, not something to work around. Vans
+              run without a helper often enough that leaving the last
+              one selected would quietly credit the wrong person. */}
+          <button
+            type="button"
+            onClick={() => onChange({ driverId, helperId: null })}
+            className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+              helperId === null
+                ? 'bg-surface-card text-brand'
+                : 'bg-invert-subtle text-content-invert-secondary'
+            }`}
+          >
+            No helper today
+          </button>
+          {helpers.map((person) => (
+            <button
+              key={person.id}
+              type="button"
+              onClick={() => onChange({ driverId, helperId: person.id })}
+              className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+                person.id === helperId
+                  ? 'bg-surface-card text-brand'
+                  : 'bg-invert-subtle text-content-invert-secondary'
+              }`}
+            >
+              {person.fullName}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="flex-1 rounded-lg bg-surface-card py-2 text-xs font-bold text-brand"
+        >
+          Done
+        </button>
+        {changed && (
+          <button
+            type="button"
+            onClick={() => {
+              onChange(null);
+              setOpen(false);
+            }}
+            className="flex-1 rounded-lg py-2 text-xs font-bold text-content-invert-secondary"
+          >
+            Back to the usual crew
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'del'];
 
@@ -1014,6 +1198,9 @@ const Checklist = ({
   onError,
   onCorrected,
   openItems,
+  people,
+  crew,
+  onCrew,
 }: {
   van: FleetEntry;
   checkItems: CheckItem[];
@@ -1045,6 +1232,9 @@ const Checklist = ({
   onError: (message: string) => void;
   onCorrected: (plate: string, driverName: string) => void;
   openItems: OpenItem[];
+  people: Driver[];
+  crew: { driverId: string; helperId: string | null } | null;
+  onCrew: (next: { driverId: string; helperId: string | null } | null) => void;
 }) => {
   let label = 'Submit check';
   if (saving) {
@@ -1066,6 +1256,7 @@ const Checklist = ({
         onBack={onBack}
       >
         <CorrectDetails van={van} onCorrected={onCorrected} />
+        <CrewPicker van={van} people={people} crew={crew} onChange={onCrew} />
       </Header>
 
       <div className="px-5 pt-4">
