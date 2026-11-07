@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BulkImport } from './BulkImport';
+import type { Drift } from '@/lib/crewDrift';
 import type { OpenItem } from '@/lib/openItems';
 import { CaloMark } from './CaloMark';
 import { PlateScanner, type PlateReading } from './PlateScanner';
@@ -16,7 +17,15 @@ import type {
   Van,
 } from '@/lib/types';
 
-type Tab = 'reports' | 'training' | 'awards' | 'areas' | 'vans' | 'drivers' | 'options';
+type Tab =
+  | 'reports'
+  | 'training'
+  | 'awards'
+  | 'onboarding'
+  | 'areas'
+  | 'vans'
+  | 'drivers'
+  | 'options';
 
 type ReportRow = {
   id: string;
@@ -72,6 +81,7 @@ type Props = {
   actions: CheckAction[];
   checkItems: CheckItem[];
   openItems: OpenItem[];
+  drift: Drift[];
   isAdmin: boolean;
 };
 
@@ -83,6 +93,7 @@ export const AdminDashboard = ({
   actions,
   checkItems,
   openItems,
+  drift,
   isAdmin,
 }: Props) => {
   const router = useRouter();
@@ -168,7 +179,18 @@ export const AdminDashboard = ({
         )}
 
         <nav className="mt-4 flex gap-1 overflow-x-auto">
-          {(['reports', 'training', 'awards', 'areas', 'vans', 'drivers', 'options'] as Tab[]).map(
+          {(
+            [
+              'reports',
+              'training',
+              'awards',
+              'onboarding',
+              'areas',
+              'vans',
+              'drivers',
+              'options',
+            ] as Tab[]
+          ).map(
             (key) => (
             <button
               key={key}
@@ -216,7 +238,10 @@ export const AdminDashboard = ({
 
         {tab === 'reports' && (
           <>
-            <Reports areas={areas} openItems={openItems} onGo={setTab} />
+            <CrewDriftPanel drift={drift} busy={busy} onCall={call} />
+            <div className="mt-4">
+              <Reports areas={areas} openItems={openItems} onGo={setTab} />
+            </div>
           </>
         )}
 
@@ -224,6 +249,8 @@ export const AdminDashboard = ({
         {tab === 'training' && <TrainingTab areas={areas} />}
 
         {tab === 'awards' && <AwardsTab drivers={drivers} />}
+
+        {tab === 'onboarding' && <OnboardingTab drivers={drivers} />}
 
         {tab === 'options' && (
           <OptionsTab
@@ -2040,6 +2067,398 @@ const Standings = ({ standings }: { standings: Candidate[] }) => {
         </div>
       )}
     </>
+  );
+};
+
+type Stage = {
+  id: string;
+  code: string;
+  label: string;
+  helpText: string | null;
+  durationDays: number;
+};
+
+type Person = {
+  driverId: string;
+  fullName: string;
+  staffRole: 'driver' | 'helper';
+  state: 'not_started' | 'in_progress' | 'complete';
+  stagesDone: number;
+  stagesTotal: number;
+  fleetDay: number | null;
+  fleetDays: number | null;
+};
+
+type Progress = {
+  stageId: string;
+  startedOn: string | null;
+  completedOn: string | null;
+};
+
+const STATE_META = {
+  in_progress: { label: 'In progress', dot: 'dot warn' },
+  not_started: { label: 'Not started', dot: 'dot bad' },
+  complete: { label: 'Onboarded', dot: 'dot' },
+} as const;
+
+const describe = (person: Person): string => {
+  if (person.state === 'complete') {
+    return 'All stages done';
+  }
+  if (person.state === 'not_started') {
+    return 'Nothing recorded yet';
+  }
+  if (person.fleetDay !== null && person.fleetDays !== null) {
+    return `Day ${person.fleetDay} of ${person.fleetDays} on fleet`;
+  }
+  return `${person.stagesDone} of ${person.stagesTotal} stages done`;
+};
+
+/**
+ * Onboarding: two classroom sessions, then seven days on the fleet.
+ *
+ * Opens on the people partway through, because that is where the work
+ * is. Someone on day 6 of 7 needs signing off; someone who finished
+ * last month does not need looking at.
+ */
+const OnboardingTab = ({ drivers }: { drivers: Driver[] }) => {
+  const [stages, setStages] = useState<Stage[]>([]);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [driverId, setDriverId] = useState('');
+  const [progress, setProgress] = useState<Progress[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const [showComplete, setShowComplete] = useState(false);
+
+  const load = useCallback(async (): Promise<void> => {
+    const response = await fetch('/api/onboarding');
+    if (response.ok) {
+      const body = (await response.json()) as { stages: Stage[]; people: Person[] };
+      setStages(body.stages);
+      setPeople(body.people);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // What is already recorded for the chosen person, so the form opens
+  // on their actual position rather than blank.
+  useEffect(() => {
+    if (driverId === '') {
+      setProgress([]);
+      return;
+    }
+    void (async () => {
+      const response = await fetch(`/api/onboarding?driverId=${driverId}`);
+      if (response.ok) {
+        const body = (await response.json()) as { progress: Progress[] };
+        setProgress(body.progress);
+      }
+    })();
+  }, [driverId]);
+
+  const save = async (
+    stageId: string,
+    field: 'startedOn' | 'completedOn',
+    value: string,
+  ): Promise<void> => {
+    const existing = progress.find((row) => row.stageId === stageId);
+    setBusy(true);
+    setDone(null);
+    try {
+      const response = await fetch('/api/onboarding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          driverId,
+          stageId,
+          startedOn: field === 'startedOn' ? value : (existing?.startedOn ?? null),
+          completedOn: field === 'completedOn' ? value : (existing?.completedOn ?? null),
+          notes: '',
+        }),
+      });
+
+      if (!response.ok) {
+        const body: unknown = await response.json();
+        setDone(
+          typeof body === 'object' && body !== null && 'error' in body
+            ? String((body as { error: unknown }).error)
+            : 'Could not save',
+        );
+        return;
+      }
+
+      setDone('Saved.');
+      const refreshed = await fetch(`/api/onboarding?driverId=${driverId}`);
+      if (refreshed.ok) {
+        setProgress(((await refreshed.json()) as { progress: Progress[] }).progress);
+      }
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const active = people.filter((person) => person.state !== 'complete');
+  const complete = people.filter((person) => person.state === 'complete');
+  const chosen = people.find((person) => person.driverId === driverId);
+
+  return (
+    <div className="space-y-4">
+      {done !== null && (
+        <div className="rounded-xl bg-pass-soft p-3 text-sm font-medium text-pass">{done}</div>
+      )}
+
+      <div className="overflow-hidden rounded-xl border border-line bg-surface-card">
+        <div className="border-b border-line px-4 py-3">
+          <div className="text-sm font-bold text-content">
+            {active.length === 0 ? 'Everyone is onboarded' : `${active.length} still in onboarding`}
+          </div>
+          <p className="mt-0.5 text-xs text-content-secondary">
+            Two classroom sessions, then seven days on the fleet. The inspector sees where
+            someone is before starting a check on their van.
+          </p>
+        </div>
+
+        {active.map((person) => (
+          <div key={person.driverId} className="item border-0 border-b border-line last:border-b-0">
+            <span className={STATE_META[person.state].dot} />
+            <div className="main">
+              <div className="text-sm font-bold text-content">{person.fullName}</div>
+              <div className="text-xs text-content-secondary">
+                {person.staffRole} &middot; {describe(person)}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDriverId(person.driverId)}
+              className="rounded-full border border-line px-4 py-1.5 text-xs font-bold text-brand"
+            >
+              {driverId === person.driverId ? 'Open' : 'Update'}
+            </button>
+          </div>
+        ))}
+
+        {active.length === 0 && (
+          <p className="px-4 py-8 text-center text-sm text-content-secondary">
+            Every active driver and helper has finished all three stages.
+          </p>
+        )}
+      </div>
+
+      <Panel title={chosen === undefined ? 'Record a stage' : `Onboarding: ${chosen.fullName}`}>
+        <Field label="Who">
+          <select
+            value={driverId}
+            onChange={(event) => setDriverId(event.target.value)}
+            className={inputClass}
+          >
+            <option value="">Choose a person</option>
+            {drivers
+              .filter((person) => person.active)
+              .map((person) => (
+                <option key={person.id} value={person.id}>
+                  {person.fullName}
+                </option>
+              ))}
+          </select>
+        </Field>
+
+        {driverId !== '' && (
+          <div className="mt-4 space-y-3">
+            {stages.map((stage) => {
+              const row = progress.find((entry) => entry.stageId === stage.id);
+              const finished = row?.completedOn != null;
+
+              return (
+                <div
+                  key={stage.id}
+                  className={`rounded-lg border p-3 ${
+                    finished ? 'border-pass bg-pass-soft' : 'border-line bg-surface-page'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <span className="text-sm font-bold text-content">{stage.label}</span>
+                      {stage.helpText !== null && (
+                        <span className="ml-2 text-xs text-content-secondary">
+                          {stage.helpText}
+                        </span>
+                      )}
+                    </div>
+                    {finished && (
+                      <span className="rounded-full bg-pass px-2.5 py-0.5 text-[11px] font-bold text-content-invert">
+                        Done
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap gap-3">
+                    {/* Only a stage with a duration needs a start date.
+                        A one hour session has a date, not a period. */}
+                    {stage.durationDays > 0 && (
+                      <Field label="Started">
+                        <input
+                          type="date"
+                          value={row?.startedOn ?? ''}
+                          disabled={busy}
+                          onChange={(event) =>
+                            void save(stage.id, 'startedOn', event.target.value)
+                          }
+                          className={inputClass}
+                        />
+                      </Field>
+                    )}
+                    <Field label={stage.durationDays > 0 ? 'Signed off' : 'Date'}>
+                      <input
+                        type="date"
+                        value={row?.completedOn ?? ''}
+                        disabled={busy}
+                        onChange={(event) =>
+                          void save(stage.id, 'completedOn', event.target.value)
+                        }
+                        className={inputClass}
+                      />
+                    </Field>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Panel>
+
+      {complete.length > 0 && (
+        <div className="overflow-hidden rounded-xl border border-line bg-surface-card">
+          <button
+            type="button"
+            onClick={() => setShowComplete(!showComplete)}
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+          >
+            <div className="text-sm font-bold text-content">{complete.length} onboarded</div>
+            <span className="text-xs font-bold text-brand">
+              {showComplete ? 'Hide' : 'Show'}
+            </span>
+          </button>
+
+          {showComplete && (
+            <div className="border-t border-line">
+              {complete.map((person) => (
+                <div
+                  key={person.driverId}
+                  className="flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0"
+                >
+                  <span className="dot" />
+                  <span className="text-sm font-bold text-content">{person.fullName}</span>
+                  <span className="text-xs text-content-secondary">{person.staffRole}</span>
+                  <button
+                    type="button"
+                    onClick={() => setDriverId(person.driverId)}
+                    className="ml-auto text-xs font-bold text-brand"
+                  >
+                    View
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * Vans being driven by someone other than the person assigned.
+ *
+ * The inspector records who was actually there and is never asked why,
+ * because at 06:30 she cannot know whether it is a sick day or a
+ * handover. Three or more sightings in a fortnight answers it, and this
+ * is where someone decides.
+ */
+const CrewDriftPanel = ({
+  drift,
+  busy,
+  onCall,
+}: {
+  drift: Drift[];
+  busy: boolean;
+  onCall: CallFn;
+}) => {
+  const [open, setOpen] = useState(false);
+
+  if (drift.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-line bg-surface-card">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+      >
+        <div>
+          <div className="text-sm font-bold text-content">
+            {drift.length} van{drift.length === 1 ? '' : 's'} with a different driver
+          </div>
+          <p className="mt-0.5 text-xs text-content-secondary">
+            Recorded on the round but not reassigned. Cover, or a handover nobody wrote down.
+          </p>
+        </div>
+        <span className="shrink-0 text-xs font-bold text-brand">{open ? 'Hide' : 'Show'}</span>
+      </button>
+
+      {open && (
+        <div className="border-t border-line">
+          {drift.map((entry) => (
+            <div
+              key={`${entry.vanId}-${entry.actualDriverId}`}
+              className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3 last:border-b-0"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-bold text-content">
+                  {entry.plate}{' '}
+                  <span className="font-normal text-content-secondary">{entry.areaName}</span>
+                </div>
+                <div className="mt-0.5 text-xs text-content-secondary">
+                  <span className="font-bold text-content">{entry.actualName}</span> drove it{' '}
+                  {entry.timesSeen} of the last {entry.totalChecks} check
+                  {entry.totalChecks === 1 ? '' : 's'}
+                  {entry.assignedName === null
+                    ? ', and nobody is assigned'
+                    : `, but ${entry.assignedName} is still assigned`}
+                  .
+                </div>
+              </div>
+
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  void onCall('/api/admin/drivers', 'PATCH', {
+                    id: entry.actualDriverId,
+                    staffRole: 'driver',
+                    fullName: entry.actualName,
+                    defaultVanId: entry.vanId,
+                  })
+                }
+                className="shrink-0 rounded-full bg-brand-action px-4 py-1.5 text-xs font-bold text-content-invert"
+              >
+                Make it permanent
+              </button>
+            </div>
+          ))}
+
+          <p className="px-4 py-2 text-[11px] text-content-secondary">
+            Leaving it alone is fine. This list only appears when the same person has driven the
+            same van three or more times in a fortnight.
+          </p>
+        </div>
+      )}
+    </div>
   );
 };
 
