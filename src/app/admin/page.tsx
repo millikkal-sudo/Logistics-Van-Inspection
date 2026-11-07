@@ -8,6 +8,7 @@ import {
   listVans,
 } from '@/lib/fleetRepository';
 import { listCheckItems } from '@/lib/inspectionRepository';
+import { listCrewDrift } from '@/lib/crewDrift';
 import { listOpenItems } from '@/lib/openItems';
 import { currentProfile, ForbiddenError, UnauthorizedError } from '@/lib/session';
 
@@ -21,7 +22,8 @@ const AdminPage = async () => {
 
     // Inactive records are included here — this is the only screen where
     // you can bring one back.
-    const [areas, vans, drivers, causes, actions, checkItems, openItems] = await Promise.all([
+    const [areas, vans, drivers, causes, actions, checkItems, openItems, drift] =
+      await Promise.all([
       listAreas(true),
       listVans(true),
       listDrivers(true),
@@ -29,6 +31,7 @@ const AdminPage = async () => {
       listActions(true),
       listCheckItems(),
       listOpenItems(),
+      listCrewDrift(),
     ]);
 
     return (
@@ -40,6 +43,7 @@ const AdminPage = async () => {
         actions={actions}
         checkItems={checkItems}
         openItems={openItems}
+        drift={drift}
         isAdmin={profile.role === 'admin'}
       />
     );
